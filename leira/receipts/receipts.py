@@ -67,6 +67,9 @@ import sqlite3
 from dataclasses import asdict, dataclass
 
 from leira.dispatcher.kernel import LedgerEvent, LedgerKernel
+from leira.environment.environment import EnvironmentSnapshot, PackageInfo
+from leira.provenance.git_provenance import ProvenanceSnapshot
+from leira.workspace.workspace import ArtifactDescriptor
 
 _COLUMNS = (
     "rowid, id, operation_id, parent_event_hash, event_type, "
@@ -96,6 +99,9 @@ class ReceiptBundle:
     last_event_id: str
     event_count: int
     events: list[LedgerEvent]
+    artifacts: list[ArtifactDescriptor]
+    provenance: list[ProvenanceSnapshot]
+    environment: list[EnvironmentSnapshot]
 
 
 def _row_to_event(row: tuple) -> LedgerEvent:
@@ -204,12 +210,108 @@ def get_receipt_bundle(ledger: LedgerKernel, intent_id: str) -> ReceiptBundle | 
     if not events:
         return None
 
+    artifacts: list[ArtifactDescriptor] = []
+    provenance: list[ProvenanceSnapshot] = []
+    environment: list[EnvironmentSnapshot] = []
+    for event in events:
+        if event.event_type != "artifact_file_written":
+            continue
+        try:
+            payload = json.loads(event.payload_json)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(payload, dict) or payload.get("type") != "artifact_file":
+            continue
+        content = payload.get("content")
+        if not isinstance(content, dict):
+            continue
+        try:
+            artifacts.append(
+                ArtifactDescriptor(
+                    artifact_id=content["artifact_id"],
+                    intent_id=content["intent_id"],
+                    relative_path=content["relative_path"],
+                    sha256=content["sha256"],
+                    size_bytes=content["size_bytes"],
+                    created_at=event.created_at,
+                )
+            )
+        except KeyError:
+            continue
+    for event in events:
+        if event.event_type not in ("provenance_captured", "provenance_capture_failed"):
+            continue
+        try:
+            payload = json.loads(event.payload_json)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(payload, dict) or payload.get("type") != "provenance":
+            continue
+        content = payload.get("content")
+        if not isinstance(content, dict):
+            continue
+        try:
+            provenance.append(
+                ProvenanceSnapshot(
+                    snapshot_id=content["snapshot_id"],
+                    intent_id=content["intent_id"],
+                    repo_path=content["repo_path"],
+                    head_sha=content.get("head_sha"),
+                    branch=content.get("branch"),
+                    is_dirty=content.get("is_dirty"),
+                    status_porcelain=content["status_porcelain"],
+                    created_at=event.created_at,
+                    error_type=content.get("error_type"),
+                    stderr=content.get("stderr", ""),
+                )
+            )
+        except KeyError:
+            continue
+    for event in events:
+        if event.event_type not in ("environment_captured", "environment_capture_failed"):
+            continue
+        try:
+            payload = json.loads(event.payload_json)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(payload, dict) or payload.get("type") != "environment":
+            continue
+        content = payload.get("content")
+        if not isinstance(content, dict):
+            continue
+        packages = [
+            PackageInfo(name=item["name"], version=item["version"])
+            for item in content.get("installed_packages", [])
+            if isinstance(item, dict)
+            and isinstance(item.get("name"), str)
+            and isinstance(item.get("version"), str)
+        ]
+        try:
+            environment.append(
+                EnvironmentSnapshot(
+                    snapshot_id=content["snapshot_id"],
+                    intent_id=content["intent_id"],
+                    python_version=content["python_version"],
+                    platform=content["platform"],
+                    executable=content["executable"],
+                    installed_packages=packages,
+                    created_at=event.created_at,
+                    error_type=content.get("error_type"),
+                    stderr=content.get("stderr", ""),
+                )
+            )
+        except KeyError:
+            continue
+
     bundle = ReceiptBundle(
         intent_id=intent_id,
         first_event_id=events[0].id,
         last_event_id=events[-1].id,
         event_count=len(events),
         events=events,
+        artifacts=artifacts,
+        provenance=provenance,
+        environment=environment,
     )
     _update_receipt_projection(
         ledger,
@@ -240,6 +342,9 @@ def export_receipt_bundle(ledger: LedgerKernel, intent_id: str) -> dict:
             "last_event_id": None,
             "event_count": 0,
             "events": [],
+            "artifacts": [],
+            "provenance": [],
+            "environment": [],
         }
     return {
         "intent_id": bundle.intent_id,
@@ -248,6 +353,9 @@ def export_receipt_bundle(ledger: LedgerKernel, intent_id: str) -> dict:
         "last_event_id": bundle.last_event_id,
         "event_count": bundle.event_count,
         "events": [asdict(event) for event in bundle.events],
+        "artifacts": [asdict(artifact) for artifact in bundle.artifacts],
+        "provenance": [asdict(snapshot) for snapshot in bundle.provenance],
+        "environment": [asdict(snapshot) for snapshot in bundle.environment],
     }
 
 

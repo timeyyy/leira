@@ -108,6 +108,8 @@ class DispatchResult:
     status: str | None = None
     error_type: str | None = None
     release_error_type: str | None = None
+    provenance_snapshot_id: str | None = None
+    environment_snapshot_id: str | None = None
 
 
 def dispatch_once(
@@ -259,6 +261,239 @@ def dispatch_once(
     )
 
 
+def _fail_intent_after_provenance_failure(
+    ledger: LedgerKernel,
+    *,
+    intent_id: str,
+    worker_name: str,
+    error_type: str | None,
+    error_message: str,
+) -> DispatchResult:
+    final_append = ledger.append_event(
+        event_type="intent_failed",
+        worker_id=DISPATCHER_WORKER_ID,
+        payload={
+            "intent_id": intent_id,
+            "status": "FAILED",
+            "worker_name": worker_name,
+            "error_type": error_type,
+            "error_message": error_message,
+        },
+    )
+    if not final_append.success:
+        return DispatchResult(
+            success=False,
+            intent_id=intent_id,
+            worker_name=worker_name,
+            status="RUNNING",
+            error_type=final_append.error_type or "STORAGE_FAILURE",
+        )
+    update_intent_projection(
+        ledger,
+        intent_id=intent_id,
+        status="FAILED",
+        worker_name=worker_name,
+        last_event_id=final_append.event_id,
+        updated_at=final_append.created_at,
+    )
+    return DispatchResult(
+        success=False,
+        intent_id=intent_id,
+        worker_name=worker_name,
+        status="FAILED",
+        error_type=error_type,
+    )
+
+
+def dispatch_with_provenance(
+    ledger: LedgerKernel,
+    lifecycle: LifecycleKernel,
+    intent_id: str,
+    worker: Worker,
+    repo_path: str,
+) -> DispatchResult:
+    """Claim one intent, capture Git provenance, then invoke one worker.
+
+    This mirrors dispatch_once's mechanics, with exactly one additional
+    pre-execution gate: provenance capture happens after intent_claimed
+    and before run creation/state_running/worker invocation. Failed
+    capture is recorded, marks the intent FAILED, and prevents worker
+    invocation.
+    """
+    from leira.environment.environment import capture_environment
+    from leira.provenance.git_provenance import capture_provenance
+
+    status = get_intent_status(ledger, intent_id)
+    if status is None:
+        return DispatchResult(success=False, intent_id=intent_id, error_type="UNKNOWN_INTENT")
+    if status != "PENDING":
+        return DispatchResult(
+            success=False, intent_id=intent_id, status=status, error_type="INVALID_STATUS"
+        )
+
+    payload = _read_intent_payload(ledger, intent_id)
+    if payload is None:
+        return DispatchResult(success=False, intent_id=intent_id, error_type="UNKNOWN_INTENT")
+
+    worker_name = getattr(worker, "name", None)
+    if not isinstance(worker_name, str) or not worker_name:
+        return DispatchResult(success=False, intent_id=intent_id, error_type="INVALID_WORKER")
+
+    claimed = ledger.append_event(
+        event_type="intent_claimed",
+        worker_id=DISPATCHER_WORKER_ID,
+        payload={"intent_id": intent_id, "status": "RUNNING", "worker_name": worker_name},
+    )
+    if not claimed.success:
+        return DispatchResult(
+            success=False,
+            intent_id=intent_id,
+            worker_name=worker_name,
+            error_type=claimed.error_type or "STORAGE_FAILURE",
+        )
+    update_intent_projection(
+        ledger,
+        intent_id=intent_id,
+        status="RUNNING",
+        worker_name=worker_name,
+        last_event_id=claimed.event_id,
+        updated_at=claimed.created_at,
+    )
+
+    snapshot = capture_provenance(ledger, intent_id, repo_path)
+    if snapshot.error_type is not None:
+        failed = _fail_intent_after_provenance_failure(
+            ledger,
+            intent_id=intent_id,
+            worker_name=worker_name,
+            error_type=snapshot.error_type,
+            error_message=snapshot.stderr,
+        )
+        return DispatchResult(
+            success=failed.success,
+            intent_id=failed.intent_id,
+            worker_name=failed.worker_name,
+            status=failed.status,
+            error_type=failed.error_type,
+            release_error_type=failed.release_error_type,
+            provenance_snapshot_id=snapshot.snapshot_id,
+        )
+
+    environment_snapshot = capture_environment(ledger, intent_id)
+    if environment_snapshot.error_type is not None:
+        failed = _fail_intent_after_provenance_failure(
+            ledger,
+            intent_id=intent_id,
+            worker_name=worker_name,
+            error_type=environment_snapshot.error_type,
+            error_message=environment_snapshot.stderr,
+        )
+        return DispatchResult(
+            success=failed.success,
+            intent_id=failed.intent_id,
+            worker_name=failed.worker_name,
+            status=failed.status,
+            error_type=failed.error_type,
+            release_error_type=failed.release_error_type,
+            provenance_snapshot_id=snapshot.snapshot_id,
+            environment_snapshot_id=environment_snapshot.snapshot_id,
+        )
+
+    run = lifecycle.create_run(operation_id=intent_id)
+    if not run.success:
+        return DispatchResult(
+            success=False,
+            intent_id=intent_id,
+            worker_name=worker_name,
+            status="RUNNING",
+            error_type=run.error_type or "STORAGE_FAILURE",
+            provenance_snapshot_id=snapshot.snapshot_id,
+            environment_snapshot_id=environment_snapshot.snapshot_id,
+        )
+    run_id = run.run_id
+
+    running = lifecycle.append_lifecycle_event(run_id, "state_running")
+    if not running.success:
+        return DispatchResult(
+            success=False,
+            intent_id=intent_id,
+            worker_name=worker_name,
+            status="RUNNING",
+            error_type=running.error_type or "STORAGE_FAILURE",
+            provenance_snapshot_id=snapshot.snapshot_id,
+            environment_snapshot_id=environment_snapshot.snapshot_id,
+        )
+
+    worker_result = invoke_worker(worker, payload)
+    artifact = {
+        "type": "worker_result",
+        "content": {
+            "intent_id": intent_id,
+            "worker_name": worker_name,
+            "inputs": payload,
+            "outputs": worker_result.outputs,
+            "worker_success": worker_result.success,
+            "error_type": worker_result.error_type,
+            "error_message": worker_result.error_message,
+            "provenance_snapshot_id": snapshot.snapshot_id,
+            "environment_snapshot_id": environment_snapshot.snapshot_id,
+        },
+    }
+    artifact_written = lifecycle.append_lifecycle_event(
+        run_id, "artifact_written", extra_payload={"artifact": artifact}
+    )
+    if not artifact_written.success:
+        return DispatchResult(
+            success=False,
+            intent_id=intent_id,
+            worker_name=worker_name,
+            status="RUNNING",
+            error_type=artifact_written.error_type or "STORAGE_FAILURE",
+            provenance_snapshot_id=snapshot.snapshot_id,
+            environment_snapshot_id=environment_snapshot.snapshot_id,
+        )
+
+    final_status = "COMPLETED" if worker_result.success else "FAILED"
+    final_event_type = "intent_completed" if worker_result.success else "intent_failed"
+    final_append = ledger.append_event(
+        event_type=final_event_type,
+        worker_id=DISPATCHER_WORKER_ID,
+        payload={
+            "intent_id": intent_id,
+            "status": final_status,
+            "worker_name": worker_name,
+            "error_type": worker_result.error_type,
+            "error_message": worker_result.error_message,
+        },
+    )
+    if not final_append.success:
+        return DispatchResult(
+            success=False,
+            intent_id=intent_id,
+            worker_name=worker_name,
+            status="RUNNING",
+            error_type=final_append.error_type or "STORAGE_FAILURE",
+            provenance_snapshot_id=snapshot.snapshot_id,
+            environment_snapshot_id=environment_snapshot.snapshot_id,
+        )
+    update_intent_projection(
+        ledger,
+        intent_id=intent_id,
+        status=final_status,
+        worker_name=worker_name,
+        last_event_id=final_append.event_id,
+        updated_at=final_append.created_at,
+    )
+    return DispatchResult(
+        success=True,
+        intent_id=intent_id,
+        worker_name=worker_name,
+        status=final_status,
+        provenance_snapshot_id=snapshot.snapshot_id,
+        environment_snapshot_id=environment_snapshot.snapshot_id,
+    )
+
+
 def dispatch_by_name(
     ledger: LedgerKernel,
     lifecycle: LifecycleKernel,
@@ -315,6 +550,39 @@ def dispatch_and_track(
             status=result.status,
             error_type=result.error_type,
             release_error_type=release_result.error_type,
+            provenance_snapshot_id=result.provenance_snapshot_id,
+            environment_snapshot_id=result.environment_snapshot_id,
+        )
+    return result
+
+
+def dispatch_with_provenance_and_track(
+    ledger: LedgerKernel,
+    lifecycle: LifecycleKernel,
+    claims: "ClaimKernel",
+    intent_id: str,
+    owner_id: str,
+    worker: Worker,
+    repo_path: str,
+) -> DispatchResult:
+    """Claim, dispatch_with_provenance, release -- in that fixed order."""
+    claim_result = claims.claim_intent(intent_id, owner_id)
+    if not claim_result.success:
+        return DispatchResult(success=False, intent_id=intent_id, error_type=claim_result.error_type)
+
+    result = dispatch_with_provenance(ledger, lifecycle, intent_id, worker, repo_path)
+
+    release_result = claims.release_claim(intent_id, owner_id)
+    if not release_result.success:
+        return DispatchResult(
+            success=result.success,
+            intent_id=result.intent_id,
+            worker_name=result.worker_name,
+            status=result.status,
+            error_type=result.error_type,
+            release_error_type=release_result.error_type,
+            provenance_snapshot_id=result.provenance_snapshot_id,
+            environment_snapshot_id=result.environment_snapshot_id,
         )
     return result
 

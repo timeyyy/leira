@@ -44,6 +44,8 @@ from .dispatcher import (
     dispatch_and_track,
     dispatch_by_name,
     dispatch_once,
+    dispatch_with_provenance,
+    dispatch_with_provenance_and_track,
 )
 
 __all__ = [
@@ -72,6 +74,8 @@ __all__ = [
     "dispatch_and_track",
     "dispatch_by_name",
     "dispatch_once",
+    "dispatch_with_provenance",
+    "dispatch_with_provenance_and_track",
     "inspect_repo",
     "load_and_validate",
     "load_operation",

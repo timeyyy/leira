@@ -18,6 +18,10 @@ from __future__ import annotations
 import json
 
 from leira.dispatcher.kernel import LedgerKernel
+from leira.environment.environment import rebuild_environment_projection
+from leira.provenance.git_provenance import rebuild_provenance_projection
+from leira.sessions.sessions import rebuild_session_projection
+from leira.workspace.workspace import rebuild_artifact_projection
 
 from .state import RUN_LIFECYCLE_EVENT_TYPES, ensure_schema
 
@@ -61,3 +65,8 @@ def rebuild_projection(ledger: LedgerKernel) -> None:
                 """,
                 (run_id, event_type, event_id, created_at),
             )
+
+    rebuild_artifact_projection(ledger)
+    rebuild_provenance_projection(ledger)
+    rebuild_environment_projection(ledger)
+    rebuild_session_projection(ledger)

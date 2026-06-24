@@ -114,6 +114,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from leira.claims.claims import (
     CLAIM_ESTABLISHED_EVENT_TYPE,
@@ -122,12 +123,18 @@ from leira.claims.claims import (
 )
 from leira.dispatcher.kernel import LedgerKernel
 from leira.dispatcher.lifecycle import ALLOWED_TRANSITIONS
+from leira.environment.environment import ENVIRONMENT_EVENT_TYPES
 from leira.inbox.inbox import (
     ALLOWED_INTENT_TRANSITIONS,
     INTENT_LEDGER_EVENT_TYPES,
     TERMINAL_INTENT_STATUSES,
 )
 from leira.projection.state import RUN_LIFECYCLE_EVENT_TYPES
+from leira.provenance.git_provenance import PROVENANCE_EVENT_TYPES
+from leira.sessions.sessions import SESSION_CREATED_EVENT, SESSION_INTENT_ADDED_EVENT
+from leira.workspace.hashing import sha256
+from leira.workspace.paths import WorkspaceError, _get_artifact_path
+from leira.workspace.workspace import ARTIFACT_FILE_WRITTEN_EVENT
 
 REQUIRED_EVENT_FIELDS = (
     "id",
@@ -268,7 +275,7 @@ def check_lifecycle_transitions(events: list[dict]) -> list[str]:
 
 
 def check_artifact_schema(events: list[dict]) -> list[str]:
-    """artifact_written events must carry a well-formed artifact for a real run."""
+    """Artifact events must carry well-formed artifact payloads."""
     errors: list[str] = []
     known_run_ids = {
         run_id
@@ -294,6 +301,27 @@ def check_artifact_schema(events: list[dict]) -> list[str]:
             not isinstance(artifact, dict)
             or not isinstance(artifact.get("type"), str)
             or "content" not in artifact
+        ):
+            errors.append(f"ARTIFACT_SCHEMA_INVALID:{event['id']}")
+    for event in events:
+        if event["event_type"] != ARTIFACT_FILE_WRITTEN_EVENT:
+            continue
+        payload = _parse_payload(event)
+        content = payload.get("content") if isinstance(payload, dict) else None
+        if (
+            not isinstance(payload, dict)
+            or payload.get("type") != "artifact_file"
+            or not isinstance(content, dict)
+            or not isinstance(content.get("artifact_id"), str)
+            or not content.get("artifact_id")
+            or not isinstance(content.get("intent_id"), str)
+            or not content.get("intent_id")
+            or not isinstance(content.get("relative_path"), str)
+            or not content.get("relative_path")
+            or not isinstance(content.get("sha256"), str)
+            or not content.get("sha256")
+            or not isinstance(content.get("size_bytes"), int)
+            or content.get("size_bytes") < 0
         ):
             errors.append(f"ARTIFACT_SCHEMA_INVALID:{event['id']}")
     return errors
@@ -788,6 +816,15 @@ def compute_expected_receipt_projection(events: list[dict]) -> dict[str, tuple[s
         if payload is None:
             continue
         intent_id = payload.get("intent_id")
+        if not isinstance(intent_id, str) or not intent_id:
+            content = payload.get("content")
+            if isinstance(content, dict):
+                intent_id = content.get("intent_id")
+        if not isinstance(intent_id, str) or not intent_id:
+            artifact = payload.get("artifact")
+            content = artifact.get("content") if isinstance(artifact, dict) else None
+            if isinstance(content, dict):
+                intent_id = content.get("intent_id")
         if isinstance(intent_id, str) and intent_id:
             direct_intent_id_by_event_id[event["id"]] = intent_id
 
@@ -873,7 +910,499 @@ def check_receipt_projection(ledger: LedgerKernel, events: list[dict]) -> list[s
     return errors
 
 
-def audit(ledger: LedgerKernel) -> AuditResult:
+def compute_expected_artifact_projection(events: list[dict]) -> dict[str, tuple[str, str, str, int, str, str]]:
+    """Recompute, in memory only, what artifact_projection should say."""
+    expected: dict[str, tuple[str, str, str, int, str, str]] = {}
+    for event in events:
+        if event["event_type"] != ARTIFACT_FILE_WRITTEN_EVENT:
+            continue
+        payload = _parse_payload(event)
+        content = payload.get("content") if isinstance(payload, dict) else None
+        if not isinstance(content, dict):
+            continue
+        artifact_id = content.get("artifact_id")
+        intent_id = content.get("intent_id")
+        relative_path = content.get("relative_path")
+        digest = content.get("sha256")
+        size_bytes = content.get("size_bytes")
+        if (
+            not isinstance(artifact_id, str)
+            or not artifact_id
+            or not isinstance(intent_id, str)
+            or not intent_id
+            or not isinstance(relative_path, str)
+            or not relative_path
+            or not isinstance(digest, str)
+            or not digest
+            or not isinstance(size_bytes, int)
+            or size_bytes < 0
+        ):
+            continue
+        expected[artifact_id] = (
+            intent_id,
+            relative_path,
+            digest,
+            size_bytes,
+            event["created_at"],
+            event["id"],
+        )
+    return expected
+
+
+def check_artifact_projection(ledger: LedgerKernel, events: list[dict]) -> list[str]:
+    expected = compute_expected_artifact_projection(events)
+    try:
+        actual_rows = ledger.connection.execute(
+            "SELECT artifact_id, intent_id, relative_path, sha256, size_bytes, created_at, last_event_id "
+            "FROM artifact_projection"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        actual_rows = []
+    actual = {row[0]: (row[1], row[2], row[3], row[4], row[5], row[6]) for row in actual_rows}
+
+    errors: list[str] = []
+    for artifact_id in sorted(expected):
+        expected_entry = expected[artifact_id]
+        actual_entry = actual.get(artifact_id)
+        if actual_entry is None:
+            errors.append(f"ARTIFACT_PROJECTION_MISMATCH:{artifact_id}")
+            continue
+        if actual_entry[:5] != expected_entry[:5]:
+            errors.append(f"ARTIFACT_PROJECTION_MISMATCH:{artifact_id}")
+        if actual_entry[5] != expected_entry[5]:
+            errors.append(f"ARTIFACT_PROJECTION_LAST_EVENT_ID_MISMATCH:{artifact_id}")
+
+    for artifact_id in sorted(set(actual) - set(expected)):
+        errors.append(f"ARTIFACT_PROJECTION_UNEXPECTED_ENTRY:{artifact_id}")
+    return errors
+
+
+def check_artifact_files(
+    workspace_root: str | Path | None, events: list[dict]
+) -> list[str]:
+    if workspace_root is None:
+        return []
+
+    errors: list[str] = []
+    root = Path(workspace_root)
+    for artifact_id, (
+        intent_id,
+        relative_path,
+        digest,
+        size_bytes,
+        _created_at,
+        _event_id,
+    ) in sorted(compute_expected_artifact_projection(events).items()):
+        try:
+            path = _get_artifact_path(root, intent_id, relative_path)
+        except WorkspaceError:
+            errors.append(f"ARTIFACT_PATH_INVALID:{artifact_id}")
+            continue
+        if not path.exists() or not path.is_file():
+            errors.append(f"MISSING_ARTIFACT_FILE:{artifact_id}")
+            continue
+        content = path.read_bytes()
+        if len(content) != size_bytes:
+            errors.append(f"SIZE_MISMATCH:{artifact_id}")
+            continue
+        if sha256(content) != digest:
+            errors.append(f"HASH_MISMATCH:{artifact_id}")
+    return errors
+
+
+def _parse_provenance_content(event: dict) -> dict | None:
+    if event["event_type"] not in PROVENANCE_EVENT_TYPES:
+        return None
+    payload = _parse_payload(event)
+    content = payload.get("content") if isinstance(payload, dict) else None
+    if not isinstance(payload, dict) or payload.get("type") != "provenance":
+        return None
+    return content if isinstance(content, dict) else None
+
+
+def check_provenance_schema(events: list[dict]) -> list[str]:
+    errors: list[str] = []
+    for event in events:
+        if event["event_type"] not in PROVENANCE_EVENT_TYPES:
+            continue
+        content = _parse_provenance_content(event)
+        if (
+            not isinstance(content, dict)
+            or not isinstance(content.get("snapshot_id"), str)
+            or not content.get("snapshot_id")
+            or not isinstance(content.get("intent_id"), str)
+            or not content.get("intent_id")
+            or not isinstance(content.get("repo_path"), str)
+            or not isinstance(content.get("status_porcelain"), str)
+            or not isinstance(content.get("stderr", ""), str)
+            or (
+                content.get("is_dirty") is not None
+                and not isinstance(content.get("is_dirty"), bool)
+            )
+        ):
+            errors.append(f"PROVENANCE_SCHEMA_INVALID:{event['id']}")
+            continue
+        if event["event_type"] == "provenance_capture_failed" and not isinstance(
+            content.get("error_type"), str
+        ):
+            errors.append(f"PROVENANCE_FAILURE_ERROR_TYPE_MISSING:{event['id']}")
+        if event["event_type"] == "provenance_captured" and content.get("error_type") is not None:
+            errors.append(f"PROVENANCE_CAPTURE_ERROR_UNEXPECTED:{event['id']}")
+    return errors
+
+
+def check_unique_provenance_snapshot_ids(events: list[dict]) -> list[str]:
+    errors: list[str] = []
+    seen: set[str] = set()
+    for event in events:
+        content = _parse_provenance_content(event)
+        if content is None:
+            continue
+        snapshot_id = content.get("snapshot_id")
+        if not isinstance(snapshot_id, str) or not snapshot_id:
+            continue
+        if snapshot_id in seen:
+            errors.append(f"DUPLICATE_PROVENANCE_SNAPSHOT_ID:{snapshot_id}")
+        seen.add(snapshot_id)
+    return errors
+
+
+def compute_expected_provenance_projection(
+    events: list[dict],
+) -> dict[str, tuple[str, str, str | None, str | None, bool | None, str, str, str | None, str, str]]:
+    expected: dict[
+        str,
+        tuple[str, str, str | None, str | None, bool | None, str, str, str | None, str, str],
+    ] = {}
+    for event in events:
+        content = _parse_provenance_content(event)
+        if content is None:
+            continue
+        snapshot_id = content.get("snapshot_id")
+        intent_id = content.get("intent_id")
+        repo_path = content.get("repo_path")
+        status_porcelain = content.get("status_porcelain")
+        stderr = content.get("stderr", "")
+        is_dirty = content.get("is_dirty")
+        if (
+            not isinstance(snapshot_id, str)
+            or not snapshot_id
+            or not isinstance(intent_id, str)
+            or not intent_id
+            or not isinstance(repo_path, str)
+            or not isinstance(status_porcelain, str)
+            or not isinstance(stderr, str)
+            or (is_dirty is not None and not isinstance(is_dirty, bool))
+        ):
+            continue
+        expected[snapshot_id] = (
+            intent_id,
+            repo_path,
+            content.get("head_sha"),
+            content.get("branch"),
+            is_dirty,
+            status_porcelain,
+            event["created_at"],
+            content.get("error_type"),
+            stderr,
+            event["id"],
+        )
+    return expected
+
+
+def check_provenance_projection(ledger: LedgerKernel, events: list[dict]) -> list[str]:
+    expected = compute_expected_provenance_projection(events)
+    try:
+        actual_rows = ledger.connection.execute(
+            "SELECT snapshot_id, intent_id, repo_path, head_sha, branch, is_dirty, "
+            "status_porcelain, created_at, error_type, stderr, last_event_id "
+            "FROM provenance_projection"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        actual_rows = []
+    actual = {
+        row[0]: (
+            row[1],
+            row[2],
+            row[3],
+            row[4],
+            None if row[5] is None else bool(row[5]),
+            row[6],
+            row[7],
+            row[8],
+            row[9],
+            row[10],
+        )
+        for row in actual_rows
+    }
+
+    errors: list[str] = []
+    for snapshot_id in sorted(expected):
+        expected_entry = expected[snapshot_id]
+        actual_entry = actual.get(snapshot_id)
+        if actual_entry is None:
+            errors.append(f"PROVENANCE_PROJECTION_MISMATCH:{snapshot_id}")
+            continue
+        if actual_entry[:9] != expected_entry[:9]:
+            errors.append(f"PROVENANCE_PROJECTION_MISMATCH:{snapshot_id}")
+        if actual_entry[9] != expected_entry[9]:
+            errors.append(f"PROVENANCE_PROJECTION_LAST_EVENT_ID_MISMATCH:{snapshot_id}")
+
+    for snapshot_id in sorted(set(actual) - set(expected)):
+        errors.append(f"PROVENANCE_PROJECTION_UNEXPECTED_ENTRY:{snapshot_id}")
+    return errors
+
+
+def _parse_environment_content(event: dict) -> dict | None:
+    if event["event_type"] not in ENVIRONMENT_EVENT_TYPES:
+        return None
+    payload = _parse_payload(event)
+    content = payload.get("content") if isinstance(payload, dict) else None
+    if not isinstance(payload, dict) or payload.get("type") != "environment":
+        return None
+    return content if isinstance(content, dict) else None
+
+
+def check_environment_schema(events: list[dict]) -> list[str]:
+    errors: list[str] = []
+    for event in events:
+        content = _parse_environment_content(event)
+        if content is None:
+            continue
+        packages = content.get("installed_packages")
+        if (
+            not isinstance(content.get("snapshot_id"), str)
+            or not content.get("snapshot_id")
+            or not isinstance(content.get("intent_id"), str)
+            or not content.get("intent_id")
+            or not isinstance(content.get("python_version"), str)
+            or not isinstance(content.get("platform"), str)
+            or not isinstance(content.get("executable"), str)
+            or not isinstance(packages, list)
+            or not isinstance(content.get("stderr", ""), str)
+        ):
+            errors.append(f"ENVIRONMENT_SCHEMA_INVALID:{event['id']}")
+            continue
+        normalized = []
+        for package in packages:
+            if (
+                not isinstance(package, dict)
+                or not isinstance(package.get("name"), str)
+                or not isinstance(package.get("version"), str)
+            ):
+                errors.append(f"ENVIRONMENT_SCHEMA_INVALID:{event['id']}")
+                break
+            normalized.append((package["name"].lower(), package["version"]))
+        else:
+            if normalized != sorted(normalized):
+                errors.append(f"ENVIRONMENT_PACKAGES_NOT_SORTED:{event['id']}")
+        if event["event_type"] == "environment_capture_failed" and not isinstance(
+            content.get("error_type"), str
+        ):
+            errors.append(f"ENVIRONMENT_FAILURE_ERROR_TYPE_MISSING:{event['id']}")
+        if event["event_type"] == "environment_captured" and content.get("error_type") is not None:
+            errors.append(f"ENVIRONMENT_CAPTURE_ERROR_UNEXPECTED:{event['id']}")
+    return errors
+
+
+def check_unique_environment_snapshot_ids(events: list[dict]) -> list[str]:
+    errors: list[str] = []
+    seen: set[str] = set()
+    for event in events:
+        content = _parse_environment_content(event)
+        if content is None:
+            continue
+        snapshot_id = content.get("snapshot_id")
+        if not isinstance(snapshot_id, str) or not snapshot_id:
+            continue
+        if snapshot_id in seen:
+            errors.append(f"DUPLICATE_ENVIRONMENT_SNAPSHOT_ID:{snapshot_id}")
+        seen.add(snapshot_id)
+    return errors
+
+
+def compute_expected_environment_projection(
+    events: list[dict],
+) -> dict[str, tuple[str, str, str, str, str, str | None, str]]:
+    expected: dict[str, tuple[str, str, str, str, str, str | None, str]] = {}
+    for event in events:
+        content = _parse_environment_content(event)
+        if content is None:
+            continue
+        snapshot_id = content.get("snapshot_id")
+        intent_id = content.get("intent_id")
+        python_version = content.get("python_version")
+        platform_value = content.get("platform")
+        executable = content.get("executable")
+        if (
+            not isinstance(snapshot_id, str)
+            or not snapshot_id
+            or not isinstance(intent_id, str)
+            or not intent_id
+            or not isinstance(python_version, str)
+            or not isinstance(platform_value, str)
+            or not isinstance(executable, str)
+        ):
+            continue
+        expected[snapshot_id] = (
+            intent_id,
+            python_version,
+            platform_value,
+            executable,
+            event["created_at"],
+            content.get("error_type"),
+            event["id"],
+        )
+    return expected
+
+
+def check_environment_projection(ledger: LedgerKernel, events: list[dict]) -> list[str]:
+    expected = compute_expected_environment_projection(events)
+    try:
+        actual_rows = ledger.connection.execute(
+            "SELECT snapshot_id, intent_id, python_version, platform, executable, "
+            "created_at, error_type, last_event_id FROM environment_projection"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        actual_rows = []
+    actual = {row[0]: (row[1], row[2], row[3], row[4], row[5], row[6], row[7]) for row in actual_rows}
+
+    errors: list[str] = []
+    for snapshot_id in sorted(expected):
+        actual_entry = actual.get(snapshot_id)
+        if actual_entry is None:
+            errors.append(f"ENVIRONMENT_PROJECTION_MISMATCH:{snapshot_id}")
+            continue
+        if actual_entry[:6] != expected[snapshot_id][:6]:
+            errors.append(f"ENVIRONMENT_PROJECTION_MISMATCH:{snapshot_id}")
+        if actual_entry[6] != expected[snapshot_id][6]:
+            errors.append(f"ENVIRONMENT_PROJECTION_LAST_EVENT_ID_MISMATCH:{snapshot_id}")
+    for snapshot_id in sorted(set(actual) - set(expected)):
+        errors.append(f"ENVIRONMENT_PROJECTION_UNEXPECTED_ENTRY:{snapshot_id}")
+    return errors
+
+
+def _session_payload_ids(event: dict) -> tuple[str | None, str | None]:
+    payload = _parse_payload(event)
+    if payload is None:
+        return None, None
+    artifact = payload.get("artifact")
+    content = artifact.get("content") if isinstance(artifact, dict) else None
+    if isinstance(content, dict):
+        session_id = content.get("session_id")
+        intent_id = content.get("intent_id")
+    else:
+        session_id = payload.get("session_id")
+        intent_id = payload.get("intent_id")
+    session_id = session_id if isinstance(session_id, str) and session_id else None
+    intent_id = intent_id if isinstance(intent_id, str) and intent_id else None
+    return session_id, intent_id
+
+
+def check_session_history(events: list[dict]) -> list[str]:
+    errors: list[str] = []
+    known_intents = {
+        intent_id
+        for event in events
+        if event["event_type"] in ("intent_submitted", "intent_rejected")
+        for payload in (_parse_payload(event),)
+        if isinstance(payload, dict)
+        for intent_id in (payload.get("intent_id"),)
+        if isinstance(intent_id, str) and intent_id
+    }
+    known_sessions: set[str] = set()
+    seen_memberships: set[tuple[str, str]] = set()
+    for event in events:
+        if event["event_type"] == SESSION_CREATED_EVENT:
+            session_id, _intent_id = _session_payload_ids(event)
+            if session_id is not None:
+                known_sessions.add(session_id)
+            continue
+        if event["event_type"] != SESSION_INTENT_ADDED_EVENT:
+            continue
+        session_id, intent_id = _session_payload_ids(event)
+        if session_id is None or intent_id is None:
+            errors.append(f"SESSION_MEMBERSHIP_SCHEMA_INVALID:{event['id']}")
+            continue
+        if session_id not in known_sessions:
+            errors.append(f"SESSION_UNKNOWN_SESSION:{event['id']}")
+        if intent_id not in known_intents:
+            errors.append(f"SESSION_UNKNOWN_INTENT:{event['id']}")
+        key = (session_id, intent_id)
+        if key in seen_memberships:
+            errors.append(f"DUPLICATE_SESSION_MEMBERSHIP:{session_id}:{intent_id}")
+        seen_memberships.add(key)
+    return errors
+
+
+def compute_expected_session_projection(
+    events: list[dict],
+) -> tuple[dict[str, tuple[int, str, str]], dict[tuple[str, str], tuple[int, str, str]]]:
+    sessions: dict[str, tuple[int, str, str]] = {}
+    membership_rows: dict[tuple[str, str], tuple[int, str, str]] = {}
+    counts: dict[str, int] = {}
+    seen_memberships: set[tuple[str, str]] = set()
+    for event in events:
+        if event["event_type"] == SESSION_CREATED_EVENT:
+            session_id, _intent_id = _session_payload_ids(event)
+            if session_id is None or session_id in sessions:
+                continue
+            sessions[session_id] = (0, event["created_at"], event["id"])
+            counts[session_id] = 0
+            continue
+        if event["event_type"] != SESSION_INTENT_ADDED_EVENT:
+            continue
+        session_id, intent_id = _session_payload_ids(event)
+        if session_id is None or intent_id is None or session_id not in sessions:
+            continue
+        key = (session_id, intent_id)
+        if key in seen_memberships:
+            continue
+        seen_memberships.add(key)
+        order = counts.get(session_id, 0) + 1
+        counts[session_id] = order
+        membership_rows[key] = (order, event["created_at"], event["id"])
+        _old_count, created_at, _old_event_id = sessions[session_id]
+        sessions[session_id] = (order, created_at, event["id"])
+    return sessions, membership_rows
+
+
+def check_session_projection(ledger: LedgerKernel, events: list[dict]) -> list[str]:
+    expected_sessions, expected_memberships = compute_expected_session_projection(events)
+    try:
+        actual_session_rows = ledger.connection.execute(
+            "SELECT session_id, intent_count, created_at, last_event_id FROM session_projection"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        actual_session_rows = []
+    try:
+        actual_membership_rows = ledger.connection.execute(
+            "SELECT session_id, intent_id, membership_order, created_at, last_event_id "
+            "FROM session_membership_projection"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        actual_membership_rows = []
+
+    actual_sessions = {row[0]: (row[1], row[2], row[3]) for row in actual_session_rows}
+    actual_memberships = {
+        (row[0], row[1]): (row[2], row[3], row[4]) for row in actual_membership_rows
+    }
+
+    errors: list[str] = []
+    for session_id in sorted(expected_sessions):
+        if actual_sessions.get(session_id) != expected_sessions[session_id]:
+            errors.append(f"SESSION_PROJECTION_MISMATCH:{session_id}")
+    for session_id in sorted(set(actual_sessions) - set(expected_sessions)):
+        errors.append(f"SESSION_PROJECTION_UNEXPECTED_ENTRY:{session_id}")
+    for key in sorted(expected_memberships):
+        if actual_memberships.get(key) != expected_memberships[key]:
+            errors.append(f"SESSION_MEMBERSHIP_PROJECTION_MISMATCH:{key[0]}:{key[1]}")
+    for session_id, intent_id in sorted(set(actual_memberships) - set(expected_memberships)):
+        errors.append(f"SESSION_MEMBERSHIP_PROJECTION_UNEXPECTED_ENTRY:{session_id}:{intent_id}")
+    return errors
+
+
+def audit(ledger: LedgerKernel, workspace_root: str | Path | None = None) -> AuditResult:
     """Read the ledger and the projection table and report every disagreement.
 
     Read-only end to end: every check below is a SELECT against data
@@ -903,6 +1432,11 @@ def audit(ledger: LedgerKernel) -> AuditResult:
     errors.extend(check_worker_name_consistency(events))
     errors.extend(check_duplicate_worker_registrations(events))
     errors.extend(check_claim_history(events))
+    errors.extend(check_provenance_schema(events))
+    errors.extend(check_unique_provenance_snapshot_ids(events))
+    errors.extend(check_environment_schema(events))
+    errors.extend(check_unique_environment_snapshot_ids(events))
+    errors.extend(check_session_history(events))
 
     projection_errors = check_projections(ledger, events)
     errors.extend(projection_errors)
@@ -919,12 +1453,31 @@ def audit(ledger: LedgerKernel) -> AuditResult:
     receipt_projection_errors = check_receipt_projection(ledger, events)
     errors.extend(receipt_projection_errors)
 
+    artifact_projection_errors = check_artifact_projection(ledger, events)
+    errors.extend(artifact_projection_errors)
+
+    artifact_file_errors = check_artifact_files(workspace_root, events)
+    errors.extend(artifact_file_errors)
+
+    provenance_projection_errors = check_provenance_projection(ledger, events)
+    errors.extend(provenance_projection_errors)
+
+    environment_projection_errors = check_environment_projection(ledger, events)
+    errors.extend(environment_projection_errors)
+
+    session_projection_errors = check_session_projection(ledger, events)
+    errors.extend(session_projection_errors)
+
     projections_valid = (
         len(projection_errors) == 0
         and len(intent_errors) == 0
         and len(worker_projection_errors) == 0
         and len(claim_projection_errors) == 0
         and len(receipt_projection_errors) == 0
+        and len(artifact_projection_errors) == 0
+        and len(provenance_projection_errors) == 0
+        and len(environment_projection_errors) == 0
+        and len(session_projection_errors) == 0
     )
 
     return AuditResult(
