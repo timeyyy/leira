@@ -1,9 +1,9 @@
-# Leira v0 / v0.1 / v0.2 / v0.3 / v0.4
+# Leira v0 / v0.1 / v0.2 / v0.3 / v0.4 / v0.5
 
 The smallest honest local event ledger, the smallest possible gate on
 starting work, the smallest possible run lifecycle, the smallest
-possible seam for a worker to attach to it, and the smallest external
-adapter on top of that seam.
+possible seam for a worker to attach to it, the smallest external
+adapter on top of that seam, and the smallest repository witness.
 
 This is **not** an agent system and **not** an orchestrator. v0 is the
 kernel underneath all of that: a single-process, single-writer, SQLite-backed,
@@ -42,6 +42,18 @@ truncating oversized stdout/stderr deterministically to stay under
 ``MAX_ARTIFACT_BYTES``. "The first external intelligence invited into
 the workshop is the operating system. Not another mind."
 
+v0.5 adds the git adapter: ``inspect_repo()`` runs four read-only git
+commands (built entirely on the shell adapter's ``run_command`` — no
+process spawned directly here) and returns a typed ``GitStatusResult``:
+HEAD sha, current branch, dirty/clean, and the exact
+``status --porcelain`` output. A non-repository path, a detached HEAD,
+or a missing git executable are all just data, not kernel failures.
+``run_git_status_once()`` records the result through the same
+lifecycle as the other adapters. Leira never mutates a repository —
+no add, commit, push, pull, fetch, merge, or rebase — and never parses
+a diff or interprets ``.gitignore``. "Git introduces provenance. Before
+inviting another mind, the workshop should learn to remember itself."
+
 ## What's here
 
 ```
@@ -53,12 +65,14 @@ leira/
     lifecycle.py         # LifecycleKernel: create_run(), append_lifecycle_event(), get_run_state()
     worker.py            # Worker protocol, DeterministicStubWorker, run_worker_once()
     shell.py             # run_command(), run_shell_once()
+    git.py               # inspect_repo(), run_git_status_once()
     schema.sql           # ledger_events table + append-only triggers
     test_kernel.py
     test_envelope.py
     test_lifecycle.py
     test_worker.py
     test_shell.py
+    test_git.py
 op.yaml                  # example operation envelope
 ```
 
@@ -89,7 +103,16 @@ run code or edit files on the same machine.
 If you would not run a command directly in this process's own shell, do
 not hand it to this module.
 
-## Explicitly deferred (not in v0 / v0.1 / v0.2 / v0.3 / v0.4)
+## Security scope: the git adapter specifically
+
+``inspect_repo`` / ``run_git_status_once`` are read-only and inherit
+the same shell-adapter security scope above. They never mutate a
+repository, never run ``git add``/``commit``/``push``/``pull``, never
+parse diffs, and never interpret ``.gitignore``. Large repositories may
+make ``git status --porcelain`` slow; that is inherited honestly, not
+optimized away — Leira does not cache or schedule git inspection.
+
+## Explicitly deferred (not in v0 / v0.1 / v0.2 / v0.3 / v0.4 / v0.5)
 
 Projections, snapshots, real workers, OpenAI/Claude/Gemini adapters,
 sandboxing, environment isolation, secret filtering, quotas, approval
@@ -98,7 +121,9 @@ service, dashboards, a claim registry, belief_promoted events,
 convergence receipts, semantic validation, falsifiability evaluation,
 operation/run execution, retries, timeouts, cleanup logic, artifact
 file storage, parallelism, memory across calls, prompt generation,
-agent loops.
+agent loops, git add/commit/push/pull/fetch/merge/rebase, branch
+creation, diff parsing, .gitignore interpretation, remote
+synchronization, caching.
 
 ## Running the tests
 

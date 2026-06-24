@@ -32,6 +32,11 @@ from .shell import (
     run_command,
     run_shell_once,
 )
+from .git import (
+    GitStatusResult,
+    inspect_repo,
+    run_git_status_once,
+)
 
 __all__ = [
     "ALLOWED_TRANSITIONS",
@@ -41,6 +46,7 @@ __all__ = [
     "ContractResult",
     "DeterministicStubWorker",
     "GENESIS_PARENT_HASH",
+    "GitStatusResult",
     "LedgerKernel",
     "LifecycleKernel",
     "LifecycleResult",
@@ -52,9 +58,11 @@ __all__ = [
     "WorkerRunResult",
     "canonicalize_payload",
     "compute_event_hash",
+    "inspect_repo",
     "load_and_validate",
     "load_operation",
     "run_command",
+    "run_git_status_once",
     "run_shell_once",
     "run_worker_once",
     "validate_operation",
