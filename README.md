@@ -1,11 +1,12 @@
-# Leira v0 / v0.1 / v0.2 / v0.3 / v0.4 / v0.5 / v0.6 / v0.7
+# Leira v0 / v0.1 / v0.2 / v0.3 / v0.4 / v0.5 / v0.6 / v0.7 / v0.8
 
 The smallest honest local event ledger, the smallest possible gate on
 starting work, the smallest possible run lifecycle, the smallest
 possible seam for a worker to attach to it, the smallest external
 adapter on top of that seam, the smallest repository witness, the
-smallest general guest door for hosting any worker, and the smallest
-disposable view over all of it.
+smallest general guest door for hosting any worker, the smallest
+disposable view over all of it, and the smallest machine that checks
+its own work.
 
 This is **not** an agent system and **not** an orchestrator. v0 is the
 kernel underneath all of that: a single-process, single-writer, SQLite-backed,
@@ -88,6 +89,24 @@ derives the real state straight from the ledger regardless of what the
 projection says. "History is authoritative. Projections are
 convenience. Truth survives."
 
+v0.8 adds the auditor: ``audit(ledger) -> AuditResult`` in
+``leira/audit/auditor.py``. It reads the ledger and the projection
+table exactly as they stand, recomputes the expected projection *in
+memory only* from already-loaded ledger events (never by calling
+``rebuild_projection()``), and reports every disagreement as a
+deterministic ``CODE:identifier`` string —
+``BROKEN_HASH_CHAIN``/``MISSING_PREVIOUS_HASH`` (via
+``validate_chain()``, still a fully independent API of its own),
+``DUPLICATE_EVENT_ID``, ``MISSING_RUN_ID``, ``ILLEGAL_TRANSITION``
+(replaying ``ALLOWED_TRANSITIONS`` directly, never redefining it),
+``PROJECTION_MISMATCH``/``PROJECTION_LAST_EVENT_ID_MISMATCH``/
+``PROJECTION_UPDATED_AT_MISMATCH``, and ``ARTIFACT_SCHEMA_INVALID``.
+The auditor never writes: every check is a SELECT, the same corruption
+always produces the same error list in the same order, and a
+disagreement between the ledger and a projection is always resolved in
+the ledger's favor — reported, never repaired. "Truth lives in
+history. Repair belongs elsewhere."
+
 ## What's here
 
 ```
@@ -116,6 +135,10 @@ leira/
     state.py              # ProjectionEngine: get_current_state(), update_from_event()
     rebuild.py             # rebuild_projection()
     test_projection.py
+  audit/
+    __init__.py
+    auditor.py             # audit() -> AuditResult
+    test_auditor.py
 op.yaml                  # example operation envelope
 ```
 
@@ -155,20 +178,22 @@ parse diffs, and never interpret ``.gitignore``. Large repositories may
 make ``git status --porcelain`` slow; that is inherited honestly, not
 optimized away — Leira does not cache or schedule git inspection.
 
-## Explicitly deferred (not in v0 / v0.1 / v0.2 / v0.3 / v0.4 / v0.5 / v0.6 / v0.7)
+## Explicitly deferred (not in v0 / v0.1 / v0.2 / v0.3 / v0.4 / v0.5 / v0.6 / v0.7 / v0.8)
 
-Materialized views, indexing optimization, caching layers, a query
-planner, search, analytics, dashboards, subscriptions, streaming,
-pubsub, notifications, summaries, LLM projections, OpenAI/Claude/Gemini
-adapters, MCP, sandboxing, environment isolation, secret filtering,
-quotas, approval tokens, a conductor loop, routing, multi-process
-access, a network service, a claim registry, belief_promoted events,
-convergence receipts, semantic validation, falsifiability evaluation,
-operation/run execution, retries, timeouts, cleanup logic, artifact
-file storage, parallelism, memory across calls, prompt generation,
-conversation history, agent loops, worker orchestration, tool choice,
-git add/commit/push/pull/fetch/merge/rebase, branch creation, diff
-parsing, .gitignore interpretation, remote synchronization.
+Automatic repair, repair suggestions, rebuild during audit, anomaly
+scoring, monitoring or background audits, materialized views, indexing
+optimization, caching layers, a query planner, search, analytics,
+dashboards, subscriptions, streaming, pubsub, notifications, summaries,
+LLM projections or explanations, OpenAI/Claude/Gemini adapters, MCP,
+sandboxing, environment isolation, secret filtering, quotas, approval
+tokens, a conductor loop, routing, multi-process access, a network
+service, a claim registry, belief_promoted events, convergence
+receipts, semantic validation, falsifiability evaluation, operation/run
+execution, retries, timeouts, cleanup logic, artifact file storage,
+parallelism, memory across calls, prompt generation, conversation
+history, agent loops, worker orchestration, tool choice, git
+add/commit/push/pull/fetch/merge/rebase, branch creation, diff parsing,
+.gitignore interpretation, remote synchronization.
 
 ## Running the tests
 
