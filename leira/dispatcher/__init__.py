@@ -18,20 +18,36 @@ from .lifecycle import (
     LifecycleKernel,
     LifecycleResult,
 )
+from .worker import (
+    ArtifactValidationError,
+    DeterministicStubWorker,
+    MAX_ARTIFACT_BYTES,
+    Worker,
+    WorkerResult,
+    WorkerRunResult,
+    run_worker_once,
+)
 
 __all__ = [
     "ALLOWED_TRANSITIONS",
+    "ArtifactValidationError",
     "AppendResult",
     "ContractResult",
+    "DeterministicStubWorker",
     "GENESIS_PARENT_HASH",
     "LedgerKernel",
     "LifecycleKernel",
     "LifecycleResult",
+    "MAX_ARTIFACT_BYTES",
     "PayloadValidationError",
     "ValidateChainResult",
+    "Worker",
+    "WorkerResult",
+    "WorkerRunResult",
     "canonicalize_payload",
     "compute_event_hash",
     "load_and_validate",
     "load_operation",
+    "run_worker_once",
     "validate_operation",
 ]

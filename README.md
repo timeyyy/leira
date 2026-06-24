@@ -1,7 +1,8 @@
-# Leira v0 / v0.1 / v0.2
+# Leira v0 / v0.1 / v0.2 / v0.3
 
 The smallest honest local event ledger, the smallest possible gate on
-starting work, and the smallest possible run lifecycle.
+starting work, the smallest possible run lifecycle, and the smallest
+possible seam for a worker to attach to it.
 
 This is **not** an agent system and **not** an orchestrator. v0 is the
 kernel underneath all of that: a single-process, single-writer, SQLite-backed,
@@ -23,6 +24,14 @@ fixed table (run_created → state_running → artifact_written →
 state_completed); a run stuck at any state, or an operation with zero
 runs, is not an error — the ledger is a witness, not a supervisor.
 
+v0.3 adds the worker seam: a ``Worker`` protocol (one method, ``wake(run_id,
+context) -> WorkerResult``), a ``DeterministicStubWorker`` fixture, and
+``run_worker_once()`` to invoke a worker exactly once and record the
+result through the existing lifecycle. The call is blocking and
+synchronous — a hanging worker hangs the process; v0.3 does not add a
+timeout, thread, or async to prevent that. A worker is a test fixture
+here, not a mind.
+
 ## What's here
 
 ```
@@ -32,10 +41,12 @@ leira/
     kernel.py          # LedgerKernel: append_event(), validate_chain()
     envelope.py         # load_operation(), validate_operation(), load_and_validate()
     lifecycle.py         # LifecycleKernel: create_run(), append_lifecycle_event(), get_run_state()
+    worker.py            # Worker protocol, DeterministicStubWorker, run_worker_once()
     schema.sql           # ledger_events table + append-only triggers
     test_kernel.py
     test_envelope.py
     test_lifecycle.py
+    test_worker.py
 op.yaml                  # example operation envelope
 ```
 
@@ -56,14 +67,14 @@ This is tamper-*evidence* for one trusted process talking to its own
 database — not a security boundary against an adversary who can already
 run code or edit files on the same machine.
 
-## Explicitly deferred (not in v0 / v0.1 / v0.2)
+## Explicitly deferred (not in v0 / v0.1 / v0.2 / v0.3)
 
-Projections, snapshots, workers, adapters, quotas, approval tokens, a
-conductor loop, routing, MCP, any LLM provider integration,
+Projections, snapshots, real workers, shell/OpenAI/Claude/Gemini
+adapters, quotas, approval tokens, a conductor loop, routing, MCP,
 multi-process access, a network service, dashboards, a claim registry,
 belief_promoted events, convergence receipts, semantic validation,
 falsifiability evaluation, operation/run execution, retries, timeouts,
-cleanup logic, artifact storage.
+cleanup logic, artifact file storage, parallelism, memory across calls.
 
 ## Running the tests
 

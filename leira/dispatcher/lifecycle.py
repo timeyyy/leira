@@ -160,12 +160,21 @@ class LifecycleKernel:
             current_state="run_created",
         )
 
-    def append_lifecycle_event(self, run_id: str, event_type: str) -> LifecycleResult:
+    def append_lifecycle_event(
+        self,
+        run_id: str,
+        event_type: str,
+        extra_payload: dict | None = None,
+    ) -> LifecycleResult:
         """Append the next lifecycle event for run_id, if the transition is allowed.
 
         Mechanical enforcement only: the current state is derived from
         the ledger, and event_type must be in ALLOWED_TRANSITIONS[current_state].
         Never interprets what a state means.
+
+        extra_payload, if given, is merged into the event's payload
+        alongside run_id (e.g. an artifact_written event carries its
+        artifact this way). run_id always wins on key collision.
         """
         if event_type not in APPENDABLE_RUN_EVENTS:
             return LifecycleResult(
@@ -193,10 +202,12 @@ class LifecycleKernel:
                 ),
             )
 
+        payload = dict(extra_payload or {})
+        payload["run_id"] = run_id
         append_result = self._ledger.append_event(
             event_type=event_type,
             worker_id=LIFECYCLE_WORKER_ID,
-            payload={"run_id": run_id},
+            payload=payload,
         )
         if not append_result.success:
             return LifecycleResult(
