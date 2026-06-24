@@ -1,4 +1,4 @@
-# Leira v0 / v0.1 / v0.2 / v0.3 / v0.4 / v0.5 / v0.6 / v0.7 / v0.8 / v0.9 / v1.0
+# Leira v0 / v0.1 / v0.2 / v0.3 / v0.4 / v0.5 / v0.6 / v0.7 / v0.8 / v0.9 / v1.0 / v1.1
 
 The smallest honest local event ledger, the smallest possible gate on
 starting work, the smallest possible run lifecycle, the smallest
@@ -156,6 +156,34 @@ computation now stop at the first terminal event per intent_id, so a
 later illegal event in history can never look like the truth, only
 like the violation it is.
 
+v1.1 adds the worker registry: ``WorkerRegistry.register_worker(worker)
+-> RegisterResult`` / ``get_worker(worker_name) -> Worker | None`` /
+``list_workers() -> list[str]`` in ``leira/registry/registry.py`` -- an
+in-process ``dict[str, Worker]``, nothing more. It resolves names; it
+does not route, rank, choose, instantiate, scan packages, or load
+plugins. Registration follows the same ledger-first ordering as every
+other write in this system: validate the worker, append
+``worker_registered`` (or ``worker_registration_rejected`` on
+``INVALID_WORKER``/``DUPLICATE_WORKER``) through the unmodified
+``LedgerKernel.append_event``, and only then update the in-memory
+dict -- a failed ledger append never leaves a worker registered in
+memory. ``dispatch_by_name(ledger, lifecycle, registry, intent_id,
+worker_name)`` is the dispatcher's only new function: it looks the
+name up (``UNKNOWN_WORKER`` if missing) and delegates straight to the
+unmodified ``dispatch_once`` -- no special path, no fallback, no
+worker choice of its own. ``worker_projection`` (``worker_name``,
+``registered_at``, ``last_event_id``) is disposable and rebuildable
+via ``rebuild_worker_projection()``, exactly like every other
+projection in this system -- but the in-memory registry itself is
+*not*: a worker object is a live Python reference, and no amount of
+ledger replay can reconstruct it, only the record that its name was
+once registered. The auditor gained matching checks
+(``DUPLICATE_WORKER_REGISTRATION`` and the same
+``WORKER_PROJECTION_MISMATCH``/``_LAST_EVENT_ID_MISMATCH``/
+``_UPDATED_AT_MISMATCH``/``_UNEXPECTED_ENTRY`` family as every other
+projection check) using the same recompute-in-memory,
+compare-read-only pattern. "A router chooses. A registry resolves."
+
 ## What's here
 
 ```
@@ -168,7 +196,7 @@ leira/
     worker.py            # Worker protocol, DeterministicStubWorker, run_worker_once()
     shell.py             # run_command(), run_shell_once()
     git.py               # inspect_repo(), run_git_status_once()
-    dispatcher.py         # dispatch_once() -> DispatchResult
+    dispatcher.py         # dispatch_once() -> DispatchResult, dispatch_by_name()
     schema.sql           # ledger_events table + append-only triggers
     test_kernel.py
     test_envelope.py
@@ -194,6 +222,10 @@ leira/
     __init__.py
     inbox.py               # InboxKernel.submit_intent(), get_intent_status(), rebuild_intent_projection()
     test_inbox.py
+  registry/
+    __init__.py
+    registry.py             # WorkerRegistry, RegisterResult, rebuild_worker_projection()
+    test_registry.py
 op.yaml                  # example operation envelope
 ```
 
@@ -233,10 +265,12 @@ parse diffs, and never interpret ``.gitignore``. Large repositories may
 make ``git status --porcelain`` slow; that is inherited honestly, not
 optimized away — Leira does not cache or schedule git inspection.
 
-## Explicitly deferred (not in v0 / v0.1 / v0.2 / v0.3 / v0.4 / v0.5 / v0.6 / v0.7 / v0.8 / v0.9 / v1.0)
+## Explicitly deferred (not in v0 / v0.1 / v0.2 / v0.3 / v0.4 / v0.5 / v0.6 / v0.7 / v0.8 / v0.9 / v1.0 / v1.1)
 
-Queues, scheduling beyond one explicit call, a worker registry or
-lookup, load balancing, automatic claiming, multiple/parallel
+Queues, scheduling beyond one explicit call, routing, priorities,
+capabilities, tags, automatic/fuzzy worker selection, dependency
+injection, plugin loading, automatic discovery, dynamic imports,
+module scanning, load balancing, automatic claiming, multiple/parallel
 dispatch, stale-intent cleanup, any reaper or cleaner, automatic
 repair, repair suggestions, rebuild during audit, anomaly scoring,
 monitoring or background audits, materialized views, indexing
@@ -244,12 +278,12 @@ optimization, caching layers, a query planner, search, analytics,
 dashboards, subscriptions, streaming, pubsub, notifications, summaries,
 LLM projections or explanations, OpenAI/Claude/Gemini adapters, MCP,
 sandboxing, environment isolation, secret filtering, quotas, approval
-tokens, a conductor loop, routing, multi-process access, a network
-service, a claim registry, belief_promoted events, convergence
-receipts, semantic validation, falsifiability evaluation, retries,
-timeouts, cleanup logic, artifact file storage, parallelism, memory
-across calls, prompt generation, conversation history, agent loops,
-worker orchestration, tool choice, git
+tokens, a conductor loop, multi-process access, a network service, a
+claim registry, belief_promoted events, convergence receipts, semantic
+validation, falsifiability evaluation, retries, timeouts, cleanup
+logic, artifact file storage, parallelism, memory across calls, prompt
+generation, conversation history, agent loops, worker orchestration,
+tool choice, persistent worker objects across process restarts, git
 add/commit/push/pull/fetch/merge/rebase, branch creation, diff parsing,
 .gitignore interpretation, remote synchronization.
 

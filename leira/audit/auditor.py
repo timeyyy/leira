@@ -49,6 +49,22 @@ the expected projection computation stops updating an intent_id the
 moment it reaches one, so a later illegal event can never look like
 the truth, only like the ``ILLEGAL_TRANSITION`` it is.
 
+v1.1 adds the same treatment for the worker registry
+(``worker_registered``/``worker_registration_rejected``, appended by
+``leira.registry.registry.WorkerRegistry``): ``worker_projection`` is
+checked against ledger history using the exact same
+"recompute-in-memory, compare read-only" pattern as every other
+projection. A worker name is immutable once registered, so a second
+``worker_registered`` event for the same name (which the live registry
+itself cannot have produced in a single process, but which a
+restarted process re-registering the same name legitimately can) is
+reported as ``DUPLICATE_WORKER_REGISTRATION``, and the expected
+projection keeps only the first such event. A
+``worker_registration_rejected`` event never produces an expected
+projection entry, so a rejected name appearing in the real
+``worker_projection`` table is reported as
+``WORKER_PROJECTION_UNEXPECTED_ENTRY``.
+
 Error codes are deterministic strings of the form ``CODE:identifier``
 (e.g. ``"MISSING_RUN_ID:<event_id>"``). The same corruption, audited
 twice, always produces the exact same list in the exact same order --
@@ -512,6 +528,98 @@ def check_worker_name_consistency(events: list[dict]) -> list[str]:
     return errors
 
 
+def compute_expected_worker_projection(events: list[dict]) -> dict[str, tuple[str, str]]:
+    """Recompute, in memory only, what worker_projection should say.
+
+    Only worker_registered events ever produce an entry --
+    worker_registration_rejected never does, by construction, so a
+    rejected name can never look like a registered one here. A worker
+    name is immutable once registered: a second worker_registered
+    event for the same name (illegal history -- see
+    check_duplicate_worker_registrations) is ignored, never treated as
+    an update.
+    """
+    expected: dict[str, tuple[str, str]] = {}
+    for event in events:
+        if event["event_type"] != "worker_registered":
+            continue
+        payload = _parse_payload(event)
+        if payload is None:
+            continue
+        worker_name = payload.get("worker_name")
+        if not isinstance(worker_name, str) or not worker_name:
+            continue
+        if worker_name in expected:
+            continue
+        expected[worker_name] = (event["created_at"], event["id"])
+    return expected
+
+
+def check_duplicate_worker_registrations(events: list[dict]) -> list[str]:
+    """No worker_name may have more than one worker_registered event.
+
+    The live registry can never produce this within a single process
+    (it checks its own in-memory dict before appending), but a
+    restarted process re-registering the same name legitimately can --
+    this is the auditor's independent, ledger-wide safety net.
+    """
+    errors: list[str] = []
+    seen: set[str] = set()
+    for event in events:
+        if event["event_type"] != "worker_registered":
+            continue
+        payload = _parse_payload(event)
+        if payload is None:
+            continue
+        worker_name = payload.get("worker_name")
+        if not isinstance(worker_name, str) or not worker_name:
+            continue
+        if worker_name in seen:
+            errors.append(f"DUPLICATE_WORKER_REGISTRATION:{worker_name}")
+        seen.add(worker_name)
+    return errors
+
+
+def check_worker_projection(ledger: LedgerKernel, events: list[dict]) -> list[str]:
+    """Compare the real worker_projection table against the in-memory expected one.
+
+    Read-only: a single SELECT against worker_projection. A name
+    present in the real table but absent from the expected mapping
+    (e.g. a rejected registration that was somehow recorded as
+    registered) is reported too -- rejected registrations must never
+    appear as registered workers.
+    """
+    expected = compute_expected_worker_projection(events)
+
+    try:
+        actual_rows = ledger.connection.execute(
+            "SELECT worker_name, registered_at, last_event_id FROM worker_projection"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        actual_rows = []
+    actual = {row[0]: (row[1], row[2]) for row in actual_rows}
+
+    errors: list[str] = []
+    for worker_name in sorted(expected):
+        expected_registered_at, expected_event_id = expected[worker_name]
+        actual_entry = actual.get(worker_name)
+
+        if actual_entry is None:
+            errors.append(f"WORKER_PROJECTION_MISMATCH:{worker_name}")
+            continue
+
+        actual_registered_at, actual_event_id = actual_entry
+        if actual_registered_at != expected_registered_at:
+            errors.append(f"WORKER_PROJECTION_UPDATED_AT_MISMATCH:{worker_name}")
+        if actual_event_id != expected_event_id:
+            errors.append(f"WORKER_PROJECTION_LAST_EVENT_ID_MISMATCH:{worker_name}")
+
+    for worker_name in sorted(set(actual) - set(expected)):
+        errors.append(f"WORKER_PROJECTION_UNEXPECTED_ENTRY:{worker_name}")
+
+    return errors
+
+
 def audit(ledger: LedgerKernel) -> AuditResult:
     """Read the ledger and the projection table and report every disagreement.
 
@@ -540,6 +648,7 @@ def audit(ledger: LedgerKernel) -> AuditResult:
     errors.extend(check_intent_transitions(events))
     errors.extend(check_duplicate_claims(events))
     errors.extend(check_worker_name_consistency(events))
+    errors.extend(check_duplicate_worker_registrations(events))
 
     projection_errors = check_projections(ledger, events)
     errors.extend(projection_errors)
@@ -547,7 +656,14 @@ def audit(ledger: LedgerKernel) -> AuditResult:
     intent_errors = check_intents(ledger, events)
     errors.extend(intent_errors)
 
-    projections_valid = len(projection_errors) == 0 and len(intent_errors) == 0
+    worker_projection_errors = check_worker_projection(ledger, events)
+    errors.extend(worker_projection_errors)
+
+    projections_valid = (
+        len(projection_errors) == 0
+        and len(intent_errors) == 0
+        and len(worker_projection_errors) == 0
+    )
 
     return AuditResult(
         success=len(errors) == 0,

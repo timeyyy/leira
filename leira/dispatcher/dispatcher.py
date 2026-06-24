@@ -53,17 +53,34 @@ loop inside ``dispatch_once``. ``worker.name`` is recorded purely as
 provenance in the artifact and in
 ``intent_claimed``/``intent_completed``/``intent_failed`` -- nothing in
 this module ever reads it back to decide what to do.
+
+v1.1 note: ``dispatch_by_name(ledger, lifecycle, registry, intent_id,
+worker_name)`` resolves a name to a worker through the supplied
+``leira.registry.registry.WorkerRegistry`` and delegates directly to
+the unmodified ``dispatch_once`` above. The lookup is the registry's
+job, not this function's: ``dispatch_by_name`` adds exactly one
+``if worker is None`` check and nothing else -- no fallback, no
+similar-name matching, no special path, no choice of its own.
 """
 
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from leira.dispatcher.kernel import LedgerKernel
 from leira.dispatcher.lifecycle import LifecycleKernel
 from leira.inbox.inbox import get_intent_status, update_intent_projection
 from leira.workers.base import Worker, invoke_worker
+
+if TYPE_CHECKING:
+    # Type-checking only: leira.registry.registry imports
+    # leira.dispatcher.kernel, so a real module-level import here would
+    # risk a circular import depending on which package is imported
+    # first. dispatch_by_name only ever calls registry.get_worker(),
+    # never anything requiring the class at runtime.
+    from leira.registry.registry import WorkerRegistry
 
 # Worker id recorded against dispatcher-produced ledger events that are
 # not themselves a worker's own artifact (intent_claimed/completed/failed).
@@ -226,6 +243,27 @@ def dispatch_once(
         worker_name=worker_name,
         status=final_status,
     )
+
+
+def dispatch_by_name(
+    ledger: LedgerKernel,
+    lifecycle: LifecycleKernel,
+    registry: "WorkerRegistry",
+    intent_id: str,
+    worker_name: str,
+) -> DispatchResult:
+    """Resolve worker_name through registry, then delegate to dispatch_once unchanged.
+
+    The only new behavior here is the lookup itself and the one
+    ``UNKNOWN_WORKER`` failure path for a name the registry doesn't
+    have. No fallback, no similar-name matching, no ranking among
+    candidates, no special case: a found worker is handed straight to
+    ``dispatch_once`` exactly as a caller would hand it in directly.
+    """
+    worker = registry.get_worker(worker_name)
+    if worker is None:
+        return DispatchResult(success=False, intent_id=intent_id, error_type="UNKNOWN_WORKER")
+    return dispatch_once(ledger, lifecycle, intent_id, worker)
 
 
 def _read_intent_payload(ledger: LedgerKernel, intent_id: str) -> dict | None:

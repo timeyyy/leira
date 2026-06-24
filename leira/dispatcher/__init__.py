@@ -40,6 +40,7 @@ from .git import (
 from .dispatcher import (
     DISPATCHER_WORKER_ID,
     DispatchResult,
+    dispatch_by_name,
     dispatch_once,
 )
 
