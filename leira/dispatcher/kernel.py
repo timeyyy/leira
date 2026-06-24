@@ -87,6 +87,31 @@ class ValidateChainResult:
     message: str | None = None
 
 
+@dataclass(frozen=True)
+class LedgerEvent:
+    """One ledger_events row, exactly as stored -- a plain, structural view.
+
+    v1.3 addition: every prior version queried ledger_events directly
+    via raw SQL and ad hoc tuples/dicts (see e.g.
+    leira.audit.auditor._load_events, leira.inbox.inbox.get_intent_status).
+    leira.receipts.receipts is the first module to need a stable,
+    reusable, typed row shape rather than a one-off query, so this
+    dataclass is added here, in the ledger module, purely additively --
+    no existing method, field, or behavior of LedgerKernel changes.
+    Field order matches the ledger_events table column order exactly.
+    """
+
+    id: str
+    operation_id: str | None
+    parent_event_hash: str
+    event_type: str
+    worker_id: str
+    payload_json: str
+    artifact_hash: str | None
+    event_hash: str
+    created_at: str
+
+
 def _normalize_value(value):
     """Recursively NFC-normalize strings and reject non-canonical content.
 

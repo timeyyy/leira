@@ -78,6 +78,23 @@ released) is, by design, not an error: it is exactly the visible,
 unrepaired state the claim store's own failure model calls for, and
 ``check_claim_projection`` reports it as a normal, matching entry.
 
+v1.3 adds the same treatment for receipt bundles
+(``leira.receipts.receipts``): ``receipt_projection`` is checked
+against an independent, in-memory recomputation of "every ledger event
+for this intent_id" -- the same direct-payload-match plus
+run_created-operation_id-bridge rule ``list_receipt_events`` applies
+live, reimplemented here rather than imported, exactly as every prior
+projection check (run/intent/worker) is its own independent
+recomputation rather than a call into the live module. A bundle's
+``event_count`` mismatching the ledger's own count for that intent_id
+is the bundle-completeness check the spec calls for -- it is the same
+``RECEIPT_EVENT_COUNT_MISMATCH`` code, not a separate one, since the
+expected count is, by construction, every ledger event found for that
+intent_id. Receipts introduce no new event types and no new illegal
+transitions of their own -- an event appearing after an intent's
+terminal state is still exactly what ``check_intent_transitions``
+already reports; this section never duplicates that check.
+
 Error codes are deterministic strings of the form ``CODE:identifier``
 (e.g. ``"MISSING_RUN_ID:<event_id>"``). The same corruption, audited
 twice, always produces the exact same list in the exact same order --
@@ -751,6 +768,111 @@ def check_claim_projection(ledger: LedgerKernel, events: list[dict]) -> list[str
     return errors
 
 
+def compute_expected_receipt_projection(events: list[dict]) -> dict[str, tuple[str, str, int, str]]:
+    """Recompute, in memory only, what receipt_projection should say.
+
+    Independent reimplementation of leira.receipts.receipts'
+    "which events belong to this intent_id" rule -- direct intent_id
+    payload matches, plus run_created rows whose operation_id column
+    is this intent_id, plus every event referencing the run_id such a
+    run_created row produced. Reimplemented here rather than imported,
+    exactly like every other projection check in this module: the
+    auditor's expected state is never computed by calling into the
+    live module it is checking.
+    """
+    direct_intent_id_by_event_id: dict[str, str] = {}
+    run_id_by_intent_id: dict[str, str] = {}
+
+    for event in events:
+        payload = _parse_payload(event)
+        if payload is None:
+            continue
+        intent_id = payload.get("intent_id")
+        if isinstance(intent_id, str) and intent_id:
+            direct_intent_id_by_event_id[event["id"]] = intent_id
+
+        if event["event_type"] == "run_created":
+            operation_id = event.get("operation_id")
+            run_id = payload.get("run_id")
+            if (
+                isinstance(operation_id, str)
+                and operation_id
+                and isinstance(run_id, str)
+                and run_id
+            ):
+                run_id_by_intent_id[run_id] = operation_id
+
+    events_by_intent: dict[str, list[dict]] = {}
+    for event in events:
+        intent_id = direct_intent_id_by_event_id.get(event["id"])
+        if intent_id is None:
+            payload = _parse_payload(event)
+            run_id = payload.get("run_id") if payload else None
+            if isinstance(run_id, str) and run_id:
+                intent_id = run_id_by_intent_id.get(run_id)
+        if intent_id is None:
+            continue
+        events_by_intent.setdefault(intent_id, []).append(event)
+
+    expected: dict[str, tuple[str, str, int, str]] = {}
+    for intent_id, intent_events in events_by_intent.items():
+        expected[intent_id] = (
+            intent_events[0]["id"],
+            intent_events[-1]["id"],
+            len(intent_events),
+            intent_events[-1]["created_at"],
+        )
+    return expected
+
+
+def check_receipt_projection(ledger: LedgerKernel, events: list[dict]) -> list[str]:
+    """Compare existing receipt_projection rows against the in-memory expected ones.
+
+    Unlike every other projection in this system, receipt_projection
+    is never eagerly kept live by some other module's write path --
+    a bundle is only ever materialized when something explicitly calls
+    get_receipt_bundle()/rebuild_receipt_projection() for that
+    intent_id. So this check is one-directional: it walks the rows
+    that actually exist in receipt_projection and verifies each one
+    against the ledger, rather than requiring a row for every intent
+    the ledger has ever seen. RECEIPT_EVENT_COUNT_MISMATCH doubles as
+    the bundle-completeness check the spec calls for: the expected
+    count is, by construction, every ledger event found for that
+    intent_id, so a mismatch means either a ghost row or a missing
+    one, for any intent_id that does have a projection row.
+    """
+    expected = compute_expected_receipt_projection(events)
+
+    try:
+        actual_rows = ledger.connection.execute(
+            "SELECT intent_id, first_event_id, last_event_id, event_count, updated_at "
+            "FROM receipt_projection"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        actual_rows = []
+
+    errors: list[str] = []
+    for intent_id, actual_first, actual_last, actual_count, actual_updated_at in sorted(
+        actual_rows, key=lambda row: row[0]
+    ):
+        expected_entry = expected.get(intent_id)
+        if expected_entry is None:
+            errors.append(f"RECEIPT_PROJECTION_UNEXPECTED_ENTRY:{intent_id}")
+            continue
+
+        expected_first, expected_last, expected_count, expected_updated_at = expected_entry
+        if actual_first != expected_first:
+            errors.append(f"RECEIPT_FIRST_EVENT_ID_MISMATCH:{intent_id}")
+        if actual_last != expected_last:
+            errors.append(f"RECEIPT_LAST_EVENT_ID_MISMATCH:{intent_id}")
+        if actual_count != expected_count:
+            errors.append(f"RECEIPT_EVENT_COUNT_MISMATCH:{intent_id}")
+        if actual_updated_at != expected_updated_at:
+            errors.append(f"RECEIPT_UPDATED_AT_MISMATCH:{intent_id}")
+
+    return errors
+
+
 def audit(ledger: LedgerKernel) -> AuditResult:
     """Read the ledger and the projection table and report every disagreement.
 
@@ -794,11 +916,15 @@ def audit(ledger: LedgerKernel) -> AuditResult:
     claim_projection_errors = check_claim_projection(ledger, events)
     errors.extend(claim_projection_errors)
 
+    receipt_projection_errors = check_receipt_projection(ledger, events)
+    errors.extend(receipt_projection_errors)
+
     projections_valid = (
         len(projection_errors) == 0
         and len(intent_errors) == 0
         and len(worker_projection_errors) == 0
         and len(claim_projection_errors) == 0
+        and len(receipt_projection_errors) == 0
     )
 
     return AuditResult(

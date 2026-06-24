@@ -7,6 +7,7 @@ from .envelope import (
 from .kernel import (
     AppendResult,
     GENESIS_PARENT_HASH,
+    LedgerEvent,
     LedgerKernel,
     PayloadValidationError,
     ValidateChainResult,
@@ -56,6 +57,7 @@ __all__ = [
     "DeterministicStubWorker",
     "GENESIS_PARENT_HASH",
     "GitStatusResult",
+    "LedgerEvent",
     "LedgerKernel",
     "LifecycleKernel",
     "LifecycleResult",

@@ -1,4 +1,4 @@
-# Leira v0 / v0.1 / v0.2 / v0.3 / v0.4 / v0.5 / v0.6 / v0.7 / v0.8 / v0.9 / v1.0 / v1.1 / v1.2
+# Leira v0 / v0.1 / v0.2 / v0.3 / v0.4 / v0.5 / v0.6 / v0.7 / v0.8 / v0.9 / v1.0 / v1.1 / v1.2 / v1.3
 
 The smallest honest local event ledger, the smallest possible gate on
 starting work, the smallest possible run lifecycle, the smallest
@@ -220,13 +220,49 @@ expected-projection computation. The auditor gained matching checks
 claim is, by design, never one of them. "Claims coordinate. They do
 not decide."
 
+v1.3 adds receipt bundles: ``get_receipt_bundle(ledger, intent_id) ->
+ReceiptBundle | None`` / ``list_receipt_events(ledger, intent_id) ->
+list[LedgerEvent]`` / ``export_receipt_bundle(ledger, intent_id) ->
+dict`` in ``leira/receipts/receipts.py``. A bundle is every ledger
+event sharing an intent_id, exposed together in true ledger order
+(``rowid``, never ``created_at`` -- timestamps may collide, insertion
+order cannot) -- a view, never a second source of truth. Most
+intent-scoped events carry ``intent_id`` directly; ``state_running``/
+``artifact_written`` only carry ``run_id``, so ``list_receipt_events``
+bridges through ``run_created`` (always created with
+``operation_id=intent_id`` by the unmodified
+``leira.dispatcher.dispatcher.dispatch_once``) to find them, entirely
+through read-only queries against the existing, public
+``LedgerKernel.connection`` -- no change to the ledger, lifecycle,
+inbox, dispatcher, registry, or claim store. This version also adds
+the one small, purely additive piece the spec assumed already
+existed: a ``LedgerEvent`` dataclass in ``leira/dispatcher/kernel.py``
+(zero changes to ``LedgerKernel`` itself), since no prior version had
+ever needed a stable, typed row shape rather than a one-off query.
+``export_receipt_bundle`` returns a plain, JSON-ready dict; exporting
+the same bundle twice and serializing both with
+``json.dumps(..., sort_keys=True, separators=(",", ":"))`` is
+byte-identical, by construction. ``receipt_projection`` (``intent_id``,
+``first_event_id``, ``last_event_id``, ``event_count``, ``updated_at``)
+is disposable and rebuildable via ``rebuild_receipt_projection()`` --
+unlike every other projection in this system, nothing else eagerly
+keeps it live, since a receipt is only ever materialized on demand;
+the auditor's matching checks
+(``RECEIPT_FIRST_EVENT_ID_MISMATCH``/``_LAST_EVENT_ID_MISMATCH``/
+``_EVENT_COUNT_MISMATCH``/``_UPDATED_AT_MISMATCH``/
+``_PROJECTION_UNEXPECTED_ENTRY``) therefore only validate rows that
+actually exist, rather than requiring universal coverage.
+``RECEIPT_EVENT_COUNT_MISMATCH`` doubles as the bundle-completeness
+check the spec calls for. "Receipts expose witnesses. They do not
+build the story."
+
 ## What's here
 
 ```
 leira/
   dispatcher/
     __init__.py
-    kernel.py          # LedgerKernel: append_event(), validate_chain()
+    kernel.py          # LedgerKernel: append_event(), validate_chain(); LedgerEvent dataclass
     envelope.py         # load_operation(), validate_operation(), load_and_validate()
     lifecycle.py         # LifecycleKernel: create_run(), append_lifecycle_event(), get_run_state()
     worker.py            # Worker protocol, DeterministicStubWorker, run_worker_once()
@@ -266,6 +302,10 @@ leira/
     __init__.py
     claims.py                # ClaimKernel.claim_intent()/release_claim(), get_claim(), rebuild_claim_projection()
     test_claims.py
+  receipts/
+    __init__.py
+    receipts.py               # get_receipt_bundle(), list_receipt_events(), export_receipt_bundle(), rebuild_receipt_projection()
+    test_receipts.py
 op.yaml                  # example operation envelope
 ```
 
@@ -305,7 +345,7 @@ parse diffs, and never interpret ``.gitignore``. Large repositories may
 make ``git status --porcelain`` slow; that is inherited honestly, not
 optimized away — Leira does not cache or schedule git inspection.
 
-## Explicitly deferred (not in v0 / v0.1 / v0.2 / v0.3 / v0.4 / v0.5 / v0.6 / v0.7 / v0.8 / v0.9 / v1.0 / v1.1 / v1.2)
+## Explicitly deferred (not in v0 / v0.1 / v0.2 / v0.3 / v0.4 / v0.5 / v0.6 / v0.7 / v0.8 / v0.9 / v1.0 / v1.1 / v1.2 / v1.3)
 
 Queues, scheduling beyond one explicit call, routing, priorities,
 capabilities, tags, automatic/fuzzy worker selection, dependency
@@ -316,16 +356,18 @@ expiration, claim stealing, liveness checks, orphan cleanup, stale-
 intent cleanup, any reaper or cleaner, automatic repair/recovery,
 repair suggestions, rebuild during audit, anomaly scoring, monitoring
 or background audits, materialized views, indexing optimization,
-caching layers, a query planner, search, analytics, dashboards,
-subscriptions, streaming, pubsub, notifications, summaries, LLM
-projections or explanations, OpenAI/Claude/Gemini adapters, MCP,
-sandboxing, environment isolation, secret filtering, quotas, approval
-tokens, a conductor loop, multi-process access, a network service,
+caching layers, a query planner, search, vector databases, embeddings,
+analytics, dashboards, reports, summaries, compression, scoring,
+subscriptions, streaming, pubsub, notifications, LLM projections or
+explanations, OpenAI/Claude/Gemini adapters, MCP, sandboxing,
+environment isolation, secret filtering, quotas, approval tokens, a
+conductor loop, multi-process access, a network service,
 belief_promoted events, convergence receipts, semantic validation,
 falsifiability evaluation, retries, timeouts, cleanup logic, artifact
 file storage, parallelism, memory across calls, prompt generation,
 conversation history, agent loops, worker orchestration, tool choice,
-persistent worker objects across process restarts, git
+persistent worker objects across process restarts, external
+verification signatures, receipt signing, git
 add/commit/push/pull/fetch/merge/rebase, branch creation, diff parsing,
 .gitignore interpretation, remote synchronization.
 
