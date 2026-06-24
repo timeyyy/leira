@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
+from typing import Protocol
 
 from .envelope import load_and_validate
 from .kernel import LedgerKernel
@@ -84,11 +85,50 @@ class LifecycleResult:
     operation_id: str | None = None
 
 
-class LifecycleKernel:
-    """Run lifecycle recording on top of an existing LedgerKernel."""
+class ProjectionSink(Protocol):
+    """Structural type for an optional, disposable projection updater.
 
-    def __init__(self, ledger: LedgerKernel):
+    Defined locally so this module never imports the projection package
+    -- projections depend on the lifecycle/ledger, not the other way
+    around. Anything with this one method can be plugged in.
+    """
+
+    def update_from_event(
+        self, *, run_id: str, current_state: str, last_event_id: str, updated_at: str
+    ) -> bool: ...
+
+
+class LifecycleKernel:
+    """Run lifecycle recording on top of an existing LedgerKernel.
+
+    projection, if given, is an optional convenience sink (see
+    leira.projection.state.ProjectionEngine) updated after every
+    successful run_created/state_running/artifact_written/state_completed
+    append. A failed or absent projection update never invalidates the
+    ledger append that already succeeded -- projections are disposable;
+    rebuild_projection() can always recompute them from the ledger.
+    """
+
+    def __init__(self, ledger: LedgerKernel, projection: ProjectionSink | None = None):
         self._ledger = ledger
+        self._projection = projection
+
+    def _update_projection(
+        self, *, run_id: str, event_type: str, event_id: str | None, created_at: str | None
+    ) -> None:
+        if self._projection is None or event_id is None or created_at is None:
+            return
+        try:
+            self._projection.update_from_event(
+                run_id=run_id,
+                current_state=event_type,
+                last_event_id=event_id,
+                updated_at=created_at,
+            )
+        except Exception:
+            # Projection updates are convenience, never a reason to
+            # disturb a ledger append that already succeeded.
+            pass
 
     def validate_operation_envelope(self, path) -> LifecycleResult:
         """Load and structurally validate an op.yaml, then record the result.
@@ -152,6 +192,13 @@ class LifecycleKernel:
                 message=append_result.message,
                 operation_id=operation_id,
             )
+
+        self._update_projection(
+            run_id=run_id,
+            event_type="run_created",
+            event_id=append_result.event_id,
+            created_at=append_result.created_at,
+        )
 
         return LifecycleResult(
             success=True,
@@ -217,6 +264,13 @@ class LifecycleKernel:
                 error_type=append_result.error_type,
                 message=append_result.message,
             )
+
+        self._update_projection(
+            run_id=run_id,
+            event_type=event_type,
+            event_id=append_result.event_id,
+            created_at=append_result.created_at,
+        )
 
         return LifecycleResult(
             success=True,

@@ -1,10 +1,11 @@
-# Leira v0 / v0.1 / v0.2 / v0.3 / v0.4 / v0.5 / v0.6
+# Leira v0 / v0.1 / v0.2 / v0.3 / v0.4 / v0.5 / v0.6 / v0.7
 
 The smallest honest local event ledger, the smallest possible gate on
 starting work, the smallest possible run lifecycle, the smallest
 possible seam for a worker to attach to it, the smallest external
-adapter on top of that seam, the smallest repository witness, and the
-smallest general guest door for hosting any worker.
+adapter on top of that seam, the smallest repository witness, the
+smallest general guest door for hosting any worker, and the smallest
+disposable view over all of it.
 
 This is **not** an agent system and **not** an orchestrator. v0 is the
 kernel underneath all of that: a single-process, single-writer, SQLite-backed,
@@ -69,6 +70,24 @@ never propagated); only a failed ledger append skips
 exactly as the shell and git adapters do — no new state machine, no
 new table, no special path.
 
+v0.7 adds the projection engine: ``operation_state_projection``, a
+disposable one-row-per-run cache (``current_state``, ``last_event_id``,
+``updated_at``) over the ledger, in ``leira/projection/``.
+``LifecycleKernel`` gained an optional ``projection=`` constructor
+argument (default ``None``, fully backward compatible) — when given a
+``ProjectionEngine``, every successful run-lifecycle append also
+updates the projection, but a failed or skipped projection write never
+invalidates the ledger append that already succeeded.
+``rebuild_projection(ledger)`` recomputes the entire table from
+``ledger_events`` from scratch, inside one transaction (all-or-nothing:
+a failure partway through rolls back to the previous table state, never
+leaving a half-rebuilt projection). ``updated_at`` is always copied
+from the ledger event's own ``created_at`` — never ``datetime.now()``.
+Deleting the projection loses no truth; ``get_run_state()`` still
+derives the real state straight from the ledger regardless of what the
+projection says. "History is authoritative. Projections are
+convenience. Truth survives."
+
 ## What's here
 
 ```
@@ -92,6 +111,11 @@ leira/
     __init__.py
     base.py              # Worker protocol, EchoWorker/FailingWorker/ExplodingWorker, run_worker_once()
     test_base.py
+  projection/
+    __init__.py
+    state.py              # ProjectionEngine: get_current_state(), update_from_event()
+    rebuild.py             # rebuild_projection()
+    test_projection.py
 op.yaml                  # example operation envelope
 ```
 
@@ -131,18 +155,20 @@ parse diffs, and never interpret ``.gitignore``. Large repositories may
 make ``git status --porcelain`` slow; that is inherited honestly, not
 optimized away — Leira does not cache or schedule git inspection.
 
-## Explicitly deferred (not in v0 / v0.1 / v0.2 / v0.3 / v0.4 / v0.5 / v0.6)
+## Explicitly deferred (not in v0 / v0.1 / v0.2 / v0.3 / v0.4 / v0.5 / v0.6 / v0.7)
 
-Projections, snapshots, OpenAI/Claude/Gemini adapters, MCP, sandboxing,
-environment isolation, secret filtering, quotas, approval tokens, a
-conductor loop, routing, multi-process access, a network service,
-dashboards, a claim registry, belief_promoted events, convergence
-receipts, semantic validation, falsifiability evaluation, operation/run
-execution, retries, timeouts, cleanup logic, artifact file storage,
-parallelism, memory across calls, prompt generation, conversation
-history, agent loops, worker orchestration, tool choice, streaming, git
-add/commit/push/pull/fetch/merge/rebase, branch creation, diff parsing,
-.gitignore interpretation, remote synchronization, caching.
+Materialized views, indexing optimization, caching layers, a query
+planner, search, analytics, dashboards, subscriptions, streaming,
+pubsub, notifications, summaries, LLM projections, OpenAI/Claude/Gemini
+adapters, MCP, sandboxing, environment isolation, secret filtering,
+quotas, approval tokens, a conductor loop, routing, multi-process
+access, a network service, a claim registry, belief_promoted events,
+convergence receipts, semantic validation, falsifiability evaluation,
+operation/run execution, retries, timeouts, cleanup logic, artifact
+file storage, parallelism, memory across calls, prompt generation,
+conversation history, agent loops, worker orchestration, tool choice,
+git add/commit/push/pull/fetch/merge/rebase, branch creation, diff
+parsing, .gitignore interpretation, remote synchronization.
 
 ## Running the tests
 

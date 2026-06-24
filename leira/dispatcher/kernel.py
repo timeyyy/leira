@@ -73,6 +73,7 @@ class AppendResult:
     success: bool
     event_id: str | None = None
     event_hash: str | None = None
+    created_at: str | None = None
     error_type: str | None = None
     message: str | None = None
 
@@ -296,6 +297,7 @@ class LedgerKernel:
             success=True,
             event_id=event_id,
             event_hash=event_hash,
+            created_at=created_at,
         )
 
     def validate_chain(self) -> ValidateChainResult:
