@@ -61,6 +61,17 @@ the unmodified ``dispatch_once`` above. The lookup is the registry's
 job, not this function's: ``dispatch_by_name`` adds exactly one
 ``if worker is None`` check and nothing else -- no fallback, no
 similar-name matching, no special path, no choice of its own.
+
+v1.2 note: ``dispatch_and_track(ledger, lifecycle, claims, intent_id,
+owner_id, worker)`` brackets the unmodified ``dispatch_once`` with the
+independent ownership lock in ``leira.claims.claims.ClaimKernel`` --
+claim, dispatch, release, in that fixed order. A claim failure means
+``dispatch_once`` is never called. ``DispatchResult`` gained one new,
+optional field, ``release_error_type`` (default ``None``, so every
+existing call site and comparison is unaffected): set only when
+execution finished but the post-execution release itself failed, so
+the caller can see that the claim is now an orphan without this
+function pretending otherwise or retrying.
 """
 
 from __future__ import annotations
@@ -75,11 +86,13 @@ from leira.inbox.inbox import get_intent_status, update_intent_projection
 from leira.workers.base import Worker, invoke_worker
 
 if TYPE_CHECKING:
-    # Type-checking only: leira.registry.registry imports
-    # leira.dispatcher.kernel, so a real module-level import here would
-    # risk a circular import depending on which package is imported
-    # first. dispatch_by_name only ever calls registry.get_worker(),
-    # never anything requiring the class at runtime.
+    # Type-checking only: leira.registry.registry and
+    # leira.claims.claims both import leira.dispatcher.kernel, so a
+    # real module-level import here would risk a circular import
+    # depending on which package is imported first. Neither
+    # dispatch_by_name nor dispatch_and_track ever needs the class
+    # itself at runtime, only the instance the caller already built.
+    from leira.claims.claims import ClaimKernel
     from leira.registry.registry import WorkerRegistry
 
 # Worker id recorded against dispatcher-produced ledger events that are
@@ -94,6 +107,7 @@ class DispatchResult:
     worker_name: str | None = None
     status: str | None = None
     error_type: str | None = None
+    release_error_type: str | None = None
 
 
 def dispatch_once(
@@ -264,6 +278,45 @@ def dispatch_by_name(
     if worker is None:
         return DispatchResult(success=False, intent_id=intent_id, error_type="UNKNOWN_WORKER")
     return dispatch_once(ledger, lifecycle, intent_id, worker)
+
+
+def dispatch_and_track(
+    ledger: LedgerKernel,
+    lifecycle: LifecycleKernel,
+    claims: "ClaimKernel",
+    intent_id: str,
+    owner_id: str,
+    worker: Worker,
+) -> DispatchResult:
+    """Claim, dispatch_once, release -- in that fixed order, every time.
+
+    A claim failure means dispatch_once is never called: the claim
+    store's error_type is returned as-is. dispatch_once itself is
+    called completely unmodified. A release failure after execution is
+    never retried and never hidden -- it is reported on
+    ``release_error_type`` while the dispatch's own success/status/
+    error_type are preserved exactly as dispatch_once produced them;
+    the claim remains an orphan, visible via
+    ``leira.claims.claims.get_claim()`` and to the auditor, until
+    someone releases it explicitly.
+    """
+    claim_result = claims.claim_intent(intent_id, owner_id)
+    if not claim_result.success:
+        return DispatchResult(success=False, intent_id=intent_id, error_type=claim_result.error_type)
+
+    result = dispatch_once(ledger, lifecycle, intent_id, worker)
+
+    release_result = claims.release_claim(intent_id, owner_id)
+    if not release_result.success:
+        return DispatchResult(
+            success=result.success,
+            intent_id=result.intent_id,
+            worker_name=result.worker_name,
+            status=result.status,
+            error_type=result.error_type,
+            release_error_type=release_result.error_type,
+        )
+    return result
 
 
 def _read_intent_payload(ledger: LedgerKernel, intent_id: str) -> dict | None:

@@ -1,4 +1,4 @@
-# Leira v0 / v0.1 / v0.2 / v0.3 / v0.4 / v0.5 / v0.6 / v0.7 / v0.8 / v0.9 / v1.0 / v1.1
+# Leira v0 / v0.1 / v0.2 / v0.3 / v0.4 / v0.5 / v0.6 / v0.7 / v0.8 / v0.9 / v1.0 / v1.1 / v1.2
 
 The smallest honest local event ledger, the smallest possible gate on
 starting work, the smallest possible run lifecycle, the smallest
@@ -184,6 +184,42 @@ once registered. The auditor gained matching checks
 projection check) using the same recompute-in-memory,
 compare-read-only pattern. "A router chooses. A registry resolves."
 
+v1.2 adds the claim store: ``ClaimKernel.claim_intent(intent_id,
+owner_id) -> ClaimResult`` / ``release_claim(intent_id, owner_id) ->
+ReleaseResult`` / ``get_claim(ledger, intent_id) -> ClaimInfo | None``
+in ``leira/claims/claims.py``. It establishes exclusive ownership of an
+intent for an opaque ``owner_id`` string, completely orthogonal to the
+existing PENDING/RUNNING/COMPLETED/FAILED status the unmodified inbox
+and dispatcher already track -- an intent can be both ``PENDING`` and
+actively claimed at once. A claim requires the intent to exist, be
+``PENDING``, and have no existing active claim; only one of the v1.2
+spec's literal event names had to change to fit alongside v1.0:
+successful claims append ``intent_claim_established`` rather than
+``intent_claimed``, since that name already belongs, with a different
+shape, to the dispatcher's own intent-execution events -- reusing it
+would have corrupted ``leira.inbox.inbox.rebuild_intent_projection``
+and several existing auditor checks, which this version is told not
+to redesign. Every other event name
+(``intent_released``/``intent_claim_rejected``/``intent_release_rejected``)
+matches the spec exactly. ``dispatch_and_track(ledger, lifecycle,
+claims, intent_id, owner_id, worker)`` brackets the unmodified
+``dispatch_once`` with claim-then-release; a claim failure means
+``dispatch_once`` is never called, and a release failure after
+execution is reported on ``DispatchResult``'s new, optional
+``release_error_type`` field rather than retried or hidden -- the
+claim simply stays an orphan, fully visible via ``get_claim()`` and to
+the auditor. There are no leases, no expiration, no liveness checks,
+and no orphan cleanup: a crashed owner's claim remains active forever,
+honestly. ``intent_claim_projection`` is disposable and rebuildable via
+``rebuild_claim_projection()``, sharing one replay rule
+(``replay_claim_events()``) with ``get_claim()`` and the auditor's own
+expected-projection computation. The auditor gained matching checks
+(``DUPLICATE_ACTIVE_CLAIM``, ``RELEASE_OWNER_MISMATCH``, and the usual
+``CLAIM_PROJECTION_MISMATCH``/``_LAST_EVENT_ID_MISMATCH``/
+``_UPDATED_AT_MISMATCH``/``_UNEXPECTED_ENTRY`` family) -- an orphaned
+claim is, by design, never one of them. "Claims coordinate. They do
+not decide."
+
 ## What's here
 
 ```
@@ -196,7 +232,7 @@ leira/
     worker.py            # Worker protocol, DeterministicStubWorker, run_worker_once()
     shell.py             # run_command(), run_shell_once()
     git.py               # inspect_repo(), run_git_status_once()
-    dispatcher.py         # dispatch_once() -> DispatchResult, dispatch_by_name()
+    dispatcher.py         # dispatch_once() -> DispatchResult, dispatch_by_name(), dispatch_and_track()
     schema.sql           # ledger_events table + append-only triggers
     test_kernel.py
     test_envelope.py
@@ -226,6 +262,10 @@ leira/
     __init__.py
     registry.py             # WorkerRegistry, RegisterResult, rebuild_worker_projection()
     test_registry.py
+  claims/
+    __init__.py
+    claims.py                # ClaimKernel.claim_intent()/release_claim(), get_claim(), rebuild_claim_projection()
+    test_claims.py
 op.yaml                  # example operation envelope
 ```
 
@@ -265,25 +305,27 @@ parse diffs, and never interpret ``.gitignore``. Large repositories may
 make ``git status --porcelain`` slow; that is inherited honestly, not
 optimized away — Leira does not cache or schedule git inspection.
 
-## Explicitly deferred (not in v0 / v0.1 / v0.2 / v0.3 / v0.4 / v0.5 / v0.6 / v0.7 / v0.8 / v0.9 / v1.0 / v1.1)
+## Explicitly deferred (not in v0 / v0.1 / v0.2 / v0.3 / v0.4 / v0.5 / v0.6 / v0.7 / v0.8 / v0.9 / v1.0 / v1.1 / v1.2)
 
 Queues, scheduling beyond one explicit call, routing, priorities,
 capabilities, tags, automatic/fuzzy worker selection, dependency
 injection, plugin loading, automatic discovery, dynamic imports,
-module scanning, load balancing, automatic claiming, multiple/parallel
-dispatch, stale-intent cleanup, any reaper or cleaner, automatic
-repair, repair suggestions, rebuild during audit, anomaly scoring,
-monitoring or background audits, materialized views, indexing
-optimization, caching layers, a query planner, search, analytics,
-dashboards, subscriptions, streaming, pubsub, notifications, summaries,
-LLM projections or explanations, OpenAI/Claude/Gemini adapters, MCP,
+module scanning, load balancing, worker pools, automatic claiming,
+multiple/parallel dispatch, distributed coordination, leases, claim
+expiration, claim stealing, liveness checks, orphan cleanup, stale-
+intent cleanup, any reaper or cleaner, automatic repair/recovery,
+repair suggestions, rebuild during audit, anomaly scoring, monitoring
+or background audits, materialized views, indexing optimization,
+caching layers, a query planner, search, analytics, dashboards,
+subscriptions, streaming, pubsub, notifications, summaries, LLM
+projections or explanations, OpenAI/Claude/Gemini adapters, MCP,
 sandboxing, environment isolation, secret filtering, quotas, approval
-tokens, a conductor loop, multi-process access, a network service, a
-claim registry, belief_promoted events, convergence receipts, semantic
-validation, falsifiability evaluation, retries, timeouts, cleanup
-logic, artifact file storage, parallelism, memory across calls, prompt
-generation, conversation history, agent loops, worker orchestration,
-tool choice, persistent worker objects across process restarts, git
+tokens, a conductor loop, multi-process access, a network service,
+belief_promoted events, convergence receipts, semantic validation,
+falsifiability evaluation, retries, timeouts, cleanup logic, artifact
+file storage, parallelism, memory across calls, prompt generation,
+conversation history, agent loops, worker orchestration, tool choice,
+persistent worker objects across process restarts, git
 add/commit/push/pull/fetch/merge/rebase, branch creation, diff parsing,
 .gitignore interpretation, remote synchronization.
 

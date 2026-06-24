@@ -40,6 +40,7 @@ from .git import (
 from .dispatcher import (
     DISPATCHER_WORKER_ID,
     DispatchResult,
+    dispatch_and_track,
     dispatch_by_name,
     dispatch_once,
 )
@@ -66,6 +67,8 @@ __all__ = [
     "WorkerRunResult",
     "canonicalize_payload",
     "compute_event_hash",
+    "dispatch_and_track",
+    "dispatch_by_name",
     "dispatch_once",
     "inspect_repo",
     "load_and_validate",

@@ -65,6 +65,19 @@ projection entry, so a rejected name appearing in the real
 ``worker_projection`` table is reported as
 ``WORKER_PROJECTION_UNEXPECTED_ENTRY``.
 
+v1.2 adds the same treatment for the claim store
+(``leira.claims.claims.ClaimKernel``): ``intent_claim_projection`` is
+checked the same way, reusing
+``leira.claims.claims.replay_claim_events`` directly so the "what is
+the current active claim" rule is defined exactly once, not
+redefined here. A second claim-established event while one is already
+active is reported as ``DUPLICATE_ACTIVE_CLAIM``; a release whose
+``claim_id``/``owner_id`` doesn't match the active claim is reported
+as ``RELEASE_OWNER_MISMATCH``. An orphaned claim (established, never
+released) is, by design, not an error: it is exactly the visible,
+unrepaired state the claim store's own failure model calls for, and
+``check_claim_projection`` reports it as a normal, matching entry.
+
 Error codes are deterministic strings of the form ``CODE:identifier``
 (e.g. ``"MISSING_RUN_ID:<event_id>"``). The same corruption, audited
 twice, always produces the exact same list in the exact same order --
@@ -85,6 +98,11 @@ import json
 import sqlite3
 from dataclasses import dataclass, field
 
+from leira.claims.claims import (
+    CLAIM_ESTABLISHED_EVENT_TYPE,
+    CLAIM_RELEASED_EVENT_TYPE,
+    replay_claim_events,
+)
 from leira.dispatcher.kernel import LedgerKernel
 from leira.dispatcher.lifecycle import ALLOWED_TRANSITIONS
 from leira.inbox.inbox import (
@@ -620,6 +638,119 @@ def check_worker_projection(ledger: LedgerKernel, events: list[dict]) -> list[st
     return errors
 
 
+def _group_claim_events_by_intent(events: list[dict]) -> dict[str, list[tuple[str, dict, str, str]]]:
+    events_by_intent: dict[str, list[tuple[str, dict, str, str]]] = {}
+    for event in events:
+        if event["event_type"] not in (CLAIM_ESTABLISHED_EVENT_TYPE, CLAIM_RELEASED_EVENT_TYPE):
+            continue
+        payload = _parse_payload(event)
+        if payload is None:
+            continue
+        intent_id = payload.get("intent_id")
+        if not isinstance(intent_id, str) or not intent_id:
+            continue
+        events_by_intent.setdefault(intent_id, []).append(
+            (event["event_type"], payload, event["created_at"], event["id"])
+        )
+    return events_by_intent
+
+
+def check_claim_history(events: list[dict]) -> list[str]:
+    """Replay each intent's claim/release events and flag illegal moments.
+
+    A second CLAIM_ESTABLISHED_EVENT_TYPE while one is already active
+    is DUPLICATE_ACTIVE_CLAIM. A release whose claim_id or owner_id
+    does not match the active claim is RELEASE_OWNER_MISMATCH. Neither
+    is silently absorbed by replay_claim_events (which just ignores
+    them to compute final state) -- this is where they are reported.
+    """
+    errors: list[str] = []
+    for intent_events in _group_claim_events_by_intent(events).values():
+        active: tuple[str, str] | None = None  # (claim_id, owner_id)
+        for event_type, payload, _created_at, event_id in intent_events:
+            if event_type == CLAIM_ESTABLISHED_EVENT_TYPE:
+                if active is not None:
+                    errors.append(f"DUPLICATE_ACTIVE_CLAIM:{event_id}")
+                    continue
+                claim_id = payload.get("claim_id")
+                owner_id = payload.get("owner_id")
+                if isinstance(claim_id, str) and claim_id and isinstance(owner_id, str) and owner_id:
+                    active = (claim_id, owner_id)
+            else:
+                if active is None:
+                    continue
+                claim_id = payload.get("claim_id")
+                owner_id = payload.get("owner_id")
+                if (claim_id, owner_id) == active:
+                    active = None
+                else:
+                    errors.append(f"RELEASE_OWNER_MISMATCH:{event_id}")
+    return errors
+
+
+def compute_expected_claim_projection(events: list[dict]) -> dict[str, tuple[str, str, str, str]]:
+    """Recompute, in memory only, what intent_claim_projection should say.
+
+    Reuses leira.claims.claims.replay_claim_events directly -- the
+    same rule the live claim store applies -- grouped by intent_id, in
+    ledger insertion order.
+    """
+    expected: dict[str, tuple[str, str, str, str]] = {}
+    for intent_id, intent_events in _group_claim_events_by_intent(events).items():
+        active = replay_claim_events(intent_events)
+        if active is None:
+            continue
+        expected[intent_id] = (
+            active.claim_id,
+            active.owner_id,
+            active.claimed_at,
+            active.last_event_id,
+        )
+    return expected
+
+
+def check_claim_projection(ledger: LedgerKernel, events: list[dict]) -> list[str]:
+    """Compare the real intent_claim_projection table against the in-memory expected one.
+
+    Read-only: a single SELECT against intent_claim_projection. An
+    orphaned claim (established, never released) is, by design, not
+    an error here -- it is exactly the visible, unrepaired state this
+    check is meant to confirm, not flag.
+    """
+    expected = compute_expected_claim_projection(events)
+
+    try:
+        actual_rows = ledger.connection.execute(
+            "SELECT intent_id, claim_id, owner_id, claimed_at, last_event_id "
+            "FROM intent_claim_projection"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        actual_rows = []
+    actual = {row[0]: (row[1], row[2], row[3], row[4]) for row in actual_rows}
+
+    errors: list[str] = []
+    for intent_id in sorted(expected):
+        expected_claim_id, expected_owner_id, expected_claimed_at, expected_event_id = expected[intent_id]
+        actual_entry = actual.get(intent_id)
+
+        if actual_entry is None:
+            errors.append(f"CLAIM_PROJECTION_MISMATCH:{intent_id}")
+            continue
+
+        actual_claim_id, actual_owner_id, actual_claimed_at, actual_event_id = actual_entry
+        if actual_claim_id != expected_claim_id or actual_owner_id != expected_owner_id:
+            errors.append(f"CLAIM_PROJECTION_MISMATCH:{intent_id}")
+        if actual_claimed_at != expected_claimed_at:
+            errors.append(f"CLAIM_PROJECTION_UPDATED_AT_MISMATCH:{intent_id}")
+        if actual_event_id != expected_event_id:
+            errors.append(f"CLAIM_PROJECTION_LAST_EVENT_ID_MISMATCH:{intent_id}")
+
+    for intent_id in sorted(set(actual) - set(expected)):
+        errors.append(f"CLAIM_PROJECTION_UNEXPECTED_ENTRY:{intent_id}")
+
+    return errors
+
+
 def audit(ledger: LedgerKernel) -> AuditResult:
     """Read the ledger and the projection table and report every disagreement.
 
@@ -649,6 +780,7 @@ def audit(ledger: LedgerKernel) -> AuditResult:
     errors.extend(check_duplicate_claims(events))
     errors.extend(check_worker_name_consistency(events))
     errors.extend(check_duplicate_worker_registrations(events))
+    errors.extend(check_claim_history(events))
 
     projection_errors = check_projections(ledger, events)
     errors.extend(projection_errors)
@@ -659,10 +791,14 @@ def audit(ledger: LedgerKernel) -> AuditResult:
     worker_projection_errors = check_worker_projection(ledger, events)
     errors.extend(worker_projection_errors)
 
+    claim_projection_errors = check_claim_projection(ledger, events)
+    errors.extend(claim_projection_errors)
+
     projections_valid = (
         len(projection_errors) == 0
         and len(intent_errors) == 0
         and len(worker_projection_errors) == 0
+        and len(claim_projection_errors) == 0
     )
 
     return AuditResult(
