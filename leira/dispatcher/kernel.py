@@ -189,6 +189,16 @@ class LedgerKernel:
     def close(self) -> None:
         self._conn.close()
 
+    @property
+    def connection(self) -> sqlite3.Connection:
+        """Read-only escape hatch for callers that need to query the ledger directly.
+
+        Used by leira.dispatcher.lifecycle to derive run state; the
+        append-only triggers still apply to any write through this
+        connection, so this does not weaken the ledger's guarantees.
+        """
+        return self._conn
+
     def __enter__(self) -> "LedgerKernel":
         return self
 

@@ -13,12 +13,20 @@ from .kernel import (
     canonicalize_payload,
     compute_event_hash,
 )
+from .lifecycle import (
+    ALLOWED_TRANSITIONS,
+    LifecycleKernel,
+    LifecycleResult,
+)
 
 __all__ = [
+    "ALLOWED_TRANSITIONS",
     "AppendResult",
     "ContractResult",
     "GENESIS_PARENT_HASH",
     "LedgerKernel",
+    "LifecycleKernel",
+    "LifecycleResult",
     "PayloadValidationError",
     "ValidateChainResult",
     "canonicalize_payload",
