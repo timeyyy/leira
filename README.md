@@ -1,12 +1,12 @@
-# Leira v0 / v0.1 / v0.2 / v0.3 / v0.4 / v0.5 / v0.6 / v0.7 / v0.8
+# Leira v0 / v0.1 / v0.2 / v0.3 / v0.4 / v0.5 / v0.6 / v0.7 / v0.8 / v0.9
 
 The smallest honest local event ledger, the smallest possible gate on
 starting work, the smallest possible run lifecycle, the smallest
 possible seam for a worker to attach to it, the smallest external
 adapter on top of that seam, the smallest repository witness, the
 smallest general guest door for hosting any worker, the smallest
-disposable view over all of it, and the smallest machine that checks
-its own work.
+disposable view over all of it, the smallest machine that checks its
+own work, and the smallest durable door for intent to enter through.
 
 This is **not** an agent system and **not** an orchestrator. v0 is the
 kernel underneath all of that: a single-process, single-writer, SQLite-backed,
@@ -107,6 +107,27 @@ disagreement between the ledger and a projection is always resolved in
 the ledger's favor — reported, never repaired. "Truth lives in
 history. Repair belongs elsewhere."
 
+v0.9 adds the inbox: ``InboxKernel.submit_intent(intent_type, payload)
+-> SubmitIntentResult`` in ``leira/inbox/inbox.py``, the one door
+through which a request for work enters the workshop. Three layers,
+kept deliberately separate — Ingress (``inbox_entries``), Authority
+(``ledger_events``, via the unmodified ``LedgerKernel.append_event``),
+and Representation (``intent_projection``, disposable and rebuildable
+via ``rebuild_intent_projection()``) — all sharing the same
+``intent_id``. Validation is purely structural (non-empty
+``intent_type``, dict ``payload``, JSON-safe by the same rules the
+ledger itself enforces); a rejected intent is not an exception, it is
+durably recorded with ``status="REJECTED"`` exactly as an accepted one
+is recorded ``"PENDING"`` — both are permanent facts about what was
+asked for. There is no ``RUNNING``, ``COMPLETED``, or ``FAILED`` status
+anywhere in this module, no queue runner, no scheduler, no reaper:
+pending intents may accumulate forever, and that is honest, not a bug.
+The auditor gained matching, additive checks
+(``MISSING_INBOX_ROW``, ``INTENT_STATUS_MISMATCH``,
+``INTENT_PROJECTION_MISMATCH`` and its ``_LAST_EVENT_ID``/``_UPDATED_AT``
+variants) using the exact same read-only, recompute-in-memory pattern
+as the run-projection checks. "Intent enters. Execution waits."
+
 ## What's here
 
 ```
@@ -139,6 +160,10 @@ leira/
     __init__.py
     auditor.py             # audit() -> AuditResult
     test_auditor.py
+  inbox/
+    __init__.py
+    inbox.py               # InboxKernel.submit_intent(), rebuild_intent_projection()
+    test_inbox.py
 op.yaml                  # example operation envelope
 ```
 
@@ -178,13 +203,15 @@ parse diffs, and never interpret ``.gitignore``. Large repositories may
 make ``git status --porcelain`` slow; that is inherited honestly, not
 optimized away — Leira does not cache or schedule git inspection.
 
-## Explicitly deferred (not in v0 / v0.1 / v0.2 / v0.3 / v0.4 / v0.5 / v0.6 / v0.7 / v0.8)
+## Explicitly deferred (not in v0 / v0.1 / v0.2 / v0.3 / v0.4 / v0.5 / v0.6 / v0.7 / v0.8 / v0.9)
 
-Automatic repair, repair suggestions, rebuild during audit, anomaly
-scoring, monitoring or background audits, materialized views, indexing
-optimization, caching layers, a query planner, search, analytics,
-dashboards, subscriptions, streaming, pubsub, notifications, summaries,
-LLM projections or explanations, OpenAI/Claude/Gemini adapters, MCP,
+Intent execution, claiming, queues, priorities, workers consuming the
+inbox, stale-intent cleanup, any reaper or cleaner, automatic repair,
+repair suggestions, rebuild during audit, anomaly scoring, monitoring
+or background audits, materialized views, indexing optimization,
+caching layers, a query planner, search, analytics, dashboards,
+subscriptions, streaming, pubsub, notifications, summaries, LLM
+projections or explanations, OpenAI/Claude/Gemini adapters, MCP,
 sandboxing, environment isolation, secret filtering, quotas, approval
 tokens, a conductor loop, routing, multi-process access, a network
 service, a claim registry, belief_promoted events, convergence

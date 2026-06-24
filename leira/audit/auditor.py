@@ -30,6 +30,14 @@ run-scoped events, lifecycle transitions that skip or reorder states,
 and artifact payloads that don't match their declared schema. All of
 this is read-only; every check is a SELECT, never a write.
 
+v0.9 adds the same treatment for intents: ``inbox_entries`` and
+``intent_projection`` (see ``leira.inbox.inbox``) are checked against
+``intent_submitted``/``intent_rejected`` ledger events exactly the way
+``operation_state_projection`` is checked against run-lifecycle events
+-- expected state recomputed in memory from already-loaded events,
+compared read-only against the real tables, disagreement reported and
+never repaired.
+
 Error codes are deterministic strings of the form ``CODE:identifier``
 (e.g. ``"MISSING_RUN_ID:<event_id>"``). The same corruption, audited
 twice, always produces the exact same list in the exact same order --
@@ -52,6 +60,7 @@ from dataclasses import dataclass, field
 
 from leira.dispatcher.kernel import LedgerKernel
 from leira.dispatcher.lifecycle import ALLOWED_TRANSITIONS
+from leira.inbox.inbox import INTENT_LEDGER_EVENT_TYPES
 from leira.projection.state import RUN_LIFECYCLE_EVENT_TYPES
 
 REQUIRED_EVENT_FIELDS = (
@@ -283,6 +292,81 @@ def check_projections(ledger: LedgerKernel, events: list[dict]) -> list[str]:
     return errors
 
 
+def compute_expected_intents(events: list[dict]) -> dict[str, tuple[str, str, str]]:
+    """Recompute, in memory only, what each intent's inbox/projection row should say.
+
+    Mirrors compute_expected_projection()'s shape for run lifecycles,
+    but for intent_submitted/intent_rejected events: (status,
+    last_event_id, updated_at) per intent_id, derived purely from
+    already-loaded ledger events.
+    """
+    expected: dict[str, tuple[str, str, str]] = {}
+    for event in events:
+        if event["event_type"] not in INTENT_LEDGER_EVENT_TYPES:
+            continue
+        payload = _parse_payload(event)
+        if payload is None:
+            continue
+        intent_id = payload.get("intent_id")
+        status = payload.get("status")
+        if not isinstance(intent_id, str) or not intent_id or not isinstance(status, str):
+            continue
+        expected[intent_id] = (status, event["id"], event["created_at"])
+    return expected
+
+
+def check_intents(ledger: LedgerKernel, events: list[dict]) -> list[str]:
+    """Compare inbox_entries and intent_projection against the ledger.
+
+    Read-only: two SELECTs against inbox_entries and intent_projection.
+    If either table doesn't exist, every expected intent is reported
+    missing from it -- a disagreement to report, not a reason to
+    create the table.
+    """
+    expected = compute_expected_intents(events)
+
+    try:
+        inbox_rows = ledger.connection.execute(
+            "SELECT intent_id, status FROM inbox_entries"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        inbox_rows = []
+    inbox = {row[0]: row[1] for row in inbox_rows}
+
+    try:
+        projection_rows = ledger.connection.execute(
+            "SELECT intent_id, status, last_event_id, updated_at FROM intent_projection"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        projection_rows = []
+    projection = {row[0]: (row[1], row[2], row[3]) for row in projection_rows}
+
+    errors: list[str] = []
+    for intent_id in sorted(expected):
+        expected_status, expected_event_id, expected_updated_at = expected[intent_id]
+
+        inbox_status = inbox.get(intent_id)
+        if inbox_status is None:
+            errors.append(f"MISSING_INBOX_ROW:{intent_id}")
+        elif inbox_status != expected_status:
+            errors.append(f"INTENT_STATUS_MISMATCH:{intent_id}")
+
+        projection_entry = projection.get(intent_id)
+        if projection_entry is None:
+            errors.append(f"INTENT_PROJECTION_MISMATCH:{intent_id}")
+            continue
+
+        actual_status, actual_event_id, actual_updated_at = projection_entry
+        if actual_status != expected_status:
+            errors.append(f"INTENT_PROJECTION_MISMATCH:{intent_id}")
+        if actual_event_id != expected_event_id:
+            errors.append(f"INTENT_PROJECTION_LAST_EVENT_ID_MISMATCH:{intent_id}")
+        if actual_updated_at != expected_updated_at:
+            errors.append(f"INTENT_PROJECTION_UPDATED_AT_MISMATCH:{intent_id}")
+
+    return errors
+
+
 def audit(ledger: LedgerKernel) -> AuditResult:
     """Read the ledger and the projection table and report every disagreement.
 
@@ -312,7 +396,10 @@ def audit(ledger: LedgerKernel) -> AuditResult:
     projection_errors = check_projections(ledger, events)
     errors.extend(projection_errors)
 
-    projections_valid = len(projection_errors) == 0
+    intent_errors = check_intents(ledger, events)
+    errors.extend(intent_errors)
+
+    projections_valid = len(projection_errors) == 0 and len(intent_errors) == 0
 
     return AuditResult(
         success=len(errors) == 0,
