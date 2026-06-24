@@ -1,0 +1,17 @@
+operation:
+  id: hello
+  objective: "Build v0.1 operation envelope"
+  success_criteria:
+    - "Tests pass"
+
+metadata:
+  assumptions:
+    - "Python is installed"
+
+  claims:
+    - "The ledger exists"
+
+  failure_distinguishability:
+    stale_state:
+      notes:
+        - "Worker may hold stale state"

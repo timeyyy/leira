@@ -1,11 +1,18 @@
-# Leira v0
+# Leira v0 / v0.1
 
-The smallest honest local event ledger.
+The smallest honest local event ledger, plus the smallest possible gate
+on starting work.
 
 This is **not** an agent system and **not** an orchestrator. v0 is the
 kernel underneath all of that: a single-process, single-writer, SQLite-backed,
 hash-chained, append-only event ledger. Its only job is to preserve truth
 mechanically — the machine must be able to say no.
+
+v0.1 adds the operation envelope: a small YAML document that must exist
+and have the right shape before any operation is allowed to run. The
+kernel checks structure only — it never judges whether an objective is
+reasonable, a claim is true, or an assumption holds. No envelope, no run.
+Nothing more.
 
 ## What's here
 
@@ -13,9 +20,12 @@ mechanically — the machine must be able to say no.
 leira/
   dispatcher/
     __init__.py
-    kernel.py       # LedgerKernel: append_event(), validate_chain()
-    schema.sql       # ledger_events table + append-only triggers
+    kernel.py        # LedgerKernel: append_event(), validate_chain()
+    envelope.py       # load_operation(), validate_operation(), load_and_validate()
+    schema.sql        # ledger_events table + append-only triggers
     test_kernel.py
+    test_envelope.py
+op.yaml               # example operation envelope
 ```
 
 ## Security scope
@@ -35,15 +45,17 @@ This is tamper-*evidence* for one trusted process talking to its own
 database — not a security boundary against an adversary who can already
 run code or edit files on the same machine.
 
-## Explicitly deferred (not in v0)
+## Explicitly deferred (not in v0 / v0.1)
 
-Projections, snapshots, workers, adapters, quotas, a conductor loop,
-routing, MCP, any LLM provider integration, multi-process access, a
-network service, dashboards, a claim registry, belief_promoted events,
-convergence receipts, operation contracts.
+Projections, snapshots, workers, adapters, quotas, approval tokens, a
+conductor loop, routing, MCP, any LLM provider integration,
+multi-process access, a network service, dashboards, a claim registry,
+belief_promoted events, convergence receipts, semantic validation,
+falsifiability evaluation, operation execution.
 
 ## Running the tests
 
 ```
-python3 -m pytest leira/dispatcher/test_kernel.py -v
+pip install -r requirements.txt
+python3 -m pytest leira/dispatcher/ -v
 ```
