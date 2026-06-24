@@ -39,6 +39,12 @@ kernel does not understand prompts, outputs, meaning, quality,
 usefulness, or correctness -- it only records worker_name, inputs,
 outputs, worker_success, error_type, and error_message. A witness, not
 a judge.
+
+v1.0 note: the Worker protocol now requires a ``name`` attribute (a
+stable, non-empty string). It is recorded as provenance in ledger
+artifacts -- so that, six months later, the ledger can still say which
+guest produced which output -- and is never used for routing or
+choosing a worker; nothing in this codebase looks a worker up by name.
 """
 
 from __future__ import annotations
@@ -60,11 +66,15 @@ class WorkerResult:
 
 
 class Worker(Protocol):
+    name: str
+
     def invoke(self, inputs: dict) -> WorkerResult: ...
 
 
 class EchoWorker:
     """Reference worker: succeeds, echoing inputs back as outputs."""
+
+    name = "EchoWorker"
 
     def invoke(self, inputs: dict) -> WorkerResult:
         return WorkerResult(success=True, outputs={"echo": inputs})
@@ -72,6 +82,8 @@ class EchoWorker:
 
 class FailingWorker:
     """Reference worker: always reports failure, without raising."""
+
+    name = "FailingWorker"
 
     def invoke(self, inputs: dict) -> WorkerResult:
         return WorkerResult(
@@ -85,11 +97,13 @@ class FailingWorker:
 class ExplodingWorker:
     """Reference worker: always raises, to exercise exception capture."""
 
+    name = "ExplodingWorker"
+
     def invoke(self, inputs: dict) -> WorkerResult:
         raise RuntimeError("simulated explosion")
 
 
-def _invoke_worker(worker: Worker, inputs: dict) -> WorkerResult:
+def invoke_worker(worker: Worker, inputs: dict) -> WorkerResult:
     """Call worker.invoke(inputs), converting any exception into a typed result.
 
     Normal worker failures (WorkerResult(success=False, ...)) pass
@@ -206,7 +220,7 @@ def run_worker_once(
             message=running.message,
         )
 
-    result = _invoke_worker(worker, inputs)
+    result = invoke_worker(worker, inputs)
     artifact = _build_worker_artifact(worker_name, inputs, result)
 
     artifact_written = lifecycle.append_lifecycle_event(

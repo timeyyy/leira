@@ -55,6 +55,18 @@ No execution, no scheduling, no claiming, no queue runner, no
 priorities, no routing, no retries, no stale-intent cleanup, no reaper,
 no background task of any kind. Pending intents may accumulate
 forever; that is not a bug to clean up here.
+
+v1.0 note: execution itself (claiming, running, completing, failing)
+is added by leira.dispatcher.dispatcher, not here. This module is
+extended only to recognize the resulting event types
+(``intent_claimed``/``intent_completed``/``intent_failed``) so that
+``intent_projection`` and ``rebuild_intent_projection()`` can reflect
+them, and to expose ``get_intent_status()`` as the one authoritative
+way to ask the ledger "what is true about this intent right now."
+Terminal statuses (``COMPLETED``, ``FAILED``, and ``REJECTED``) are
+immutable: once reached, no later event for that intent_id is ever
+applied by rebuild, even if one exists in the ledger -- it is reported
+by the auditor as an illegal transition, never repaired here.
 """
 
 from __future__ import annotations
@@ -70,8 +82,44 @@ from leira.dispatcher.kernel import LedgerKernel, PayloadValidationError, canoni
 # itself is the producer here, not a worker in the v0.6 sense.
 INBOX_WORKER_ID = "kernel"
 
-# The only two ledger event types this module ever appends.
-INTENT_LEDGER_EVENT_TYPES = frozenset({"intent_submitted", "intent_rejected"})
+# Every ledger event type that carries an intent_id and an intent
+# status. intent_submitted/intent_rejected are appended by this module
+# (submit_intent); intent_claimed/intent_completed/intent_failed are
+# appended by leira.dispatcher.dispatcher.dispatch_once -- recognized
+# here so projection/rebuild/audit can treat the whole intent lifecycle
+# uniformly without this module depending on the dispatcher module.
+INTENT_LEDGER_EVENT_TYPES = frozenset(
+    {
+        "intent_submitted",
+        "intent_rejected",
+        "intent_claimed",
+        "intent_completed",
+        "intent_failed",
+    }
+)
+
+# event_type -> the status it establishes for that intent_id.
+INTENT_STATUS_BY_EVENT_TYPE: dict[str, str] = {
+    "intent_submitted": "PENDING",
+    "intent_rejected": "REJECTED",
+    "intent_claimed": "RUNNING",
+    "intent_completed": "COMPLETED",
+    "intent_failed": "FAILED",
+}
+
+# Intent-level state machine, expressed as data exactly like
+# leira.dispatcher.lifecycle.ALLOWED_TRANSITIONS for runs: event_type ->
+# allowed next event_types. REJECTED/COMPLETED/FAILED are terminal --
+# once reached, nothing may follow for that intent_id.
+ALLOWED_INTENT_TRANSITIONS: dict[str, list[str]] = {
+    "intent_submitted": ["intent_claimed"],
+    "intent_rejected": [],
+    "intent_claimed": ["intent_completed", "intent_failed"],
+    "intent_completed": [],
+    "intent_failed": [],
+}
+
+TERMINAL_INTENT_STATUSES = frozenset({"REJECTED", "COMPLETED", "FAILED"})
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS inbox_entries (
@@ -85,6 +133,7 @@ CREATE TABLE IF NOT EXISTS inbox_entries (
 CREATE TABLE IF NOT EXISTS intent_projection (
     intent_id TEXT PRIMARY KEY,
     status TEXT NOT NULL,
+    worker_name TEXT,
     updated_at TEXT NOT NULL,
     last_event_id TEXT NOT NULL
 );
@@ -193,14 +242,15 @@ class InboxKernel:
                 self._ledger.connection.execute(
                     """
                     INSERT INTO intent_projection
-                        (intent_id, status, updated_at, last_event_id)
-                    VALUES (?, ?, ?, ?)
+                        (intent_id, status, worker_name, updated_at, last_event_id)
+                    VALUES (?, ?, ?, ?, ?)
                     ON CONFLICT(intent_id) DO UPDATE SET
                         status = excluded.status,
+                        worker_name = excluded.worker_name,
                         updated_at = excluded.updated_at,
                         last_event_id = excluded.last_event_id
                     """,
-                    (intent_id, status, append_result.created_at, append_result.event_id),
+                    (intent_id, status, None, append_result.created_at, append_result.event_id),
                 )
         except sqlite3.Error:
             return SubmitIntentResult(
@@ -223,6 +273,12 @@ def rebuild_intent_projection(ledger: LedgerKernel) -> None:
     nothing: a failure partway through rolls back to the previous
     table state. updated_at is always the ledger event's own
     created_at, never datetime.now().
+
+    Terminal states are immutable: once an intent_id reaches
+    REJECTED/COMPLETED/FAILED during this chronological replay, any
+    later event for that same intent_id is ignored here -- such an
+    event is illegal history (the auditor reports it as
+    ILLEGAL_TRANSITION), and rebuild must not silently apply it.
     """
     ensure_schema(ledger)
     conn = ledger.connection
@@ -230,6 +286,8 @@ def rebuild_intent_projection(ledger: LedgerKernel) -> None:
     rows = conn.execute(
         "SELECT id, event_type, payload_json, created_at FROM ledger_events ORDER BY rowid"
     ).fetchall()
+
+    terminal_intent_ids: set[str] = set()
 
     with conn:
         conn.execute("DELETE FROM intent_projection")
@@ -246,15 +304,98 @@ def rebuild_intent_projection(ledger: LedgerKernel) -> None:
             status = payload.get("status")
             if not isinstance(intent_id, str) or not intent_id or not isinstance(status, str):
                 continue
+            if intent_id in terminal_intent_ids:
+                continue
+
+            worker_name = payload.get("worker_name")
+            worker_name = worker_name if isinstance(worker_name, str) else None
+
             conn.execute(
                 """
                 INSERT INTO intent_projection
-                    (intent_id, status, updated_at, last_event_id)
-                VALUES (?, ?, ?, ?)
+                    (intent_id, status, worker_name, updated_at, last_event_id)
+                VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT(intent_id) DO UPDATE SET
                     status = excluded.status,
+                    worker_name = excluded.worker_name,
                     updated_at = excluded.updated_at,
                     last_event_id = excluded.last_event_id
                 """,
-                (intent_id, status, created_at, event_id),
+                (intent_id, status, worker_name, created_at, event_id),
             )
+
+            if status in TERMINAL_INTENT_STATUSES:
+                terminal_intent_ids.add(intent_id)
+
+
+def get_intent_status(ledger: LedgerKernel, intent_id: str) -> str | None:
+    """Derive intent_id's current status directly from the ledger.
+
+    Mirrors leira.dispatcher.lifecycle.LifecycleKernel.get_run_state():
+    the authoritative answer is always read from ledger_events, never
+    from intent_projection. Returns None if intent_id was never
+    submitted at all.
+
+    Walks events in chronological order and stops at the first
+    terminal status reached -- exactly like rebuild_intent_projection().
+    A terminal state is immutable, so even if the ledger somehow
+    contains an illegal event after one (a bypass, not something this
+    API can produce), that later event is never treated as the truth.
+    """
+    rows = ledger.connection.execute(
+        f"""
+        SELECT event_type FROM ledger_events
+        WHERE event_type IN ({",".join("?" for _ in INTENT_LEDGER_EVENT_TYPES)})
+        AND payload_json LIKE ?
+        ORDER BY rowid ASC
+        """,
+        (*INTENT_LEDGER_EVENT_TYPES, f'%"intent_id":"{intent_id}"%'),
+    ).fetchall()
+
+    status: str | None = None
+    for (event_type,) in rows:
+        status = INTENT_STATUS_BY_EVENT_TYPE[event_type]
+        if status in TERMINAL_INTENT_STATUSES:
+            break
+    return status
+
+
+def update_intent_projection(
+    ledger: LedgerKernel,
+    *,
+    intent_id: str,
+    status: str,
+    worker_name: str | None,
+    last_event_id: str,
+    updated_at: str,
+) -> bool:
+    """Best-effort live upsert of one intent_projection row. Never raises.
+
+    Used by leira.dispatcher.dispatcher.dispatch_once after each
+    successful intent_claimed/intent_completed/intent_failed append, so
+    intent_projection normally stays fresh -- mirroring how
+    LifecycleKernel optionally keeps operation_state_projection fresh.
+    A False return (or never being called at all) is not a problem:
+    rebuild_intent_projection() can always recompute this table from
+    the ledger. A projection write failure must never be treated as a
+    reason to undo or distrust the ledger append that already
+    succeeded.
+    """
+    try:
+        with ledger.connection:
+            ledger.connection.execute(
+                """
+                INSERT INTO intent_projection
+                    (intent_id, status, worker_name, updated_at, last_event_id)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(intent_id) DO UPDATE SET
+                    status = excluded.status,
+                    worker_name = excluded.worker_name,
+                    updated_at = excluded.updated_at,
+                    last_event_id = excluded.last_event_id
+                """,
+                (intent_id, status, worker_name, updated_at, last_event_id),
+            )
+        return True
+    except sqlite3.Error:
+        return False

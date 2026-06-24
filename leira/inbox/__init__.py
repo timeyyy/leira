@@ -1,21 +1,31 @@
 from .inbox import (
+    ALLOWED_INTENT_TRANSITIONS,
     INBOX_WORKER_ID,
     INTENT_LEDGER_EVENT_TYPES,
+    INTENT_STATUS_BY_EVENT_TYPE,
+    TERMINAL_INTENT_STATUSES,
     InboxKernel,
     IntentEnvelope,
     SubmitIntentResult,
     ensure_schema,
+    get_intent_status,
     rebuild_intent_projection,
+    update_intent_projection,
     validate_intent,
 )
 
 __all__ = [
+    "ALLOWED_INTENT_TRANSITIONS",
     "INBOX_WORKER_ID",
     "INTENT_LEDGER_EVENT_TYPES",
+    "INTENT_STATUS_BY_EVENT_TYPE",
+    "TERMINAL_INTENT_STATUSES",
     "InboxKernel",
     "IntentEnvelope",
     "SubmitIntentResult",
     "ensure_schema",
+    "get_intent_status",
     "rebuild_intent_projection",
+    "update_intent_projection",
     "validate_intent",
 ]

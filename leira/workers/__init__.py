@@ -4,6 +4,7 @@ from .base import (
     FailingWorker,
     Worker,
     WorkerResult,
+    invoke_worker,
     run_worker_once,
 )
 
@@ -13,5 +14,6 @@ __all__ = [
     "FailingWorker",
     "Worker",
     "WorkerResult",
+    "invoke_worker",
     "run_worker_once",
 ]

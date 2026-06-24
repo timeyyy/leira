@@ -38,6 +38,17 @@ v0.9 adds the same treatment for intents: ``inbox_entries`` and
 compared read-only against the real tables, disagreement reported and
 never repaired.
 
+v1.0 adds the same treatment for intent *execution*
+(``intent_claimed``/``intent_completed``/``intent_failed``, appended
+by ``leira.dispatcher.dispatcher.dispatch_once``): transitions are
+replayed against ``ALLOWED_INTENT_TRANSITIONS`` exactly as run
+transitions are replayed against ``ALLOWED_TRANSITIONS``, duplicate
+claims and worker_name inconsistencies are reported, and -- because
+``COMPLETED``/``FAILED``/``REJECTED`` are immutable terminal states --
+the expected projection computation stops updating an intent_id the
+moment it reaches one, so a later illegal event can never look like
+the truth, only like the ``ILLEGAL_TRANSITION`` it is.
+
 Error codes are deterministic strings of the form ``CODE:identifier``
 (e.g. ``"MISSING_RUN_ID:<event_id>"``). The same corruption, audited
 twice, always produces the exact same list in the exact same order --
@@ -60,7 +71,11 @@ from dataclasses import dataclass, field
 
 from leira.dispatcher.kernel import LedgerKernel
 from leira.dispatcher.lifecycle import ALLOWED_TRANSITIONS
-from leira.inbox.inbox import INTENT_LEDGER_EVENT_TYPES
+from leira.inbox.inbox import (
+    ALLOWED_INTENT_TRANSITIONS,
+    INTENT_LEDGER_EVENT_TYPES,
+    TERMINAL_INTENT_STATUSES,
+)
 from leira.projection.state import RUN_LIFECYCLE_EVENT_TYPES
 
 REQUIRED_EVENT_FIELDS = (
@@ -292,15 +307,44 @@ def check_projections(ledger: LedgerKernel, events: list[dict]) -> list[str]:
     return errors
 
 
-def compute_expected_intents(events: list[dict]) -> dict[str, tuple[str, str, str]]:
-    """Recompute, in memory only, what each intent's inbox/projection row should say.
+def compute_expected_submission_status(events: list[dict]) -> dict[str, str]:
+    """What inbox_entries.status should say: fixed at submission time, forever.
 
-    Mirrors compute_expected_projection()'s shape for run lifecycles,
-    but for intent_submitted/intent_rejected events: (status,
-    last_event_id, updated_at) per intent_id, derived purely from
-    already-loaded ledger events.
+    inbox_entries is an ingress record, not a live execution tracker --
+    it is written once by submit_intent() and never touched again, so
+    it is only ever compared against the original
+    intent_submitted/intent_rejected event, never against later
+    execution events.
     """
-    expected: dict[str, tuple[str, str, str]] = {}
+    expected: dict[str, str] = {}
+    for event in events:
+        if event["event_type"] not in ("intent_submitted", "intent_rejected"):
+            continue
+        payload = _parse_payload(event)
+        if payload is None:
+            continue
+        intent_id = payload.get("intent_id")
+        status = payload.get("status")
+        if not isinstance(intent_id, str) or not intent_id or not isinstance(status, str):
+            continue
+        expected[intent_id] = status
+    return expected
+
+
+def compute_expected_intents(
+    events: list[dict],
+) -> dict[str, tuple[str, str, str, str | None]]:
+    """Recompute, in memory only, what each intent's intent_projection row should say.
+
+    Walks the full intent lifecycle (submitted/rejected/claimed/
+    completed/failed) chronologically. Once an intent_id reaches a
+    terminal status (REJECTED/COMPLETED/FAILED), this stops updating
+    it -- a terminal state is immutable, so a later event for that
+    intent_id (illegal history) is never treated as the truth here,
+    only reported elsewhere as ILLEGAL_TRANSITION.
+    """
+    expected: dict[str, tuple[str, str, str, str | None]] = {}
+    terminal_intent_ids: set[str] = set()
     for event in events:
         if event["event_type"] not in INTENT_LEDGER_EVENT_TYPES:
             continue
@@ -311,7 +355,15 @@ def compute_expected_intents(events: list[dict]) -> dict[str, tuple[str, str, st
         status = payload.get("status")
         if not isinstance(intent_id, str) or not intent_id or not isinstance(status, str):
             continue
-        expected[intent_id] = (status, event["id"], event["created_at"])
+        if intent_id in terminal_intent_ids:
+            continue
+
+        worker_name = payload.get("worker_name")
+        worker_name = worker_name if isinstance(worker_name, str) else None
+        expected[intent_id] = (status, event["id"], event["created_at"], worker_name)
+
+        if status in TERMINAL_INTENT_STATUSES:
+            terminal_intent_ids.add(intent_id)
     return expected
 
 
@@ -323,6 +375,7 @@ def check_intents(ledger: LedgerKernel, events: list[dict]) -> list[str]:
     missing from it -- a disagreement to report, not a reason to
     create the table.
     """
+    expected_submission = compute_expected_submission_status(events)
     expected = compute_expected_intents(events)
 
     try:
@@ -335,35 +388,127 @@ def check_intents(ledger: LedgerKernel, events: list[dict]) -> list[str]:
 
     try:
         projection_rows = ledger.connection.execute(
-            "SELECT intent_id, status, last_event_id, updated_at FROM intent_projection"
+            "SELECT intent_id, status, worker_name, last_event_id, updated_at "
+            "FROM intent_projection"
         ).fetchall()
     except sqlite3.OperationalError:
         projection_rows = []
-    projection = {row[0]: (row[1], row[2], row[3]) for row in projection_rows}
+    projection = {row[0]: (row[1], row[2], row[3], row[4]) for row in projection_rows}
 
     errors: list[str] = []
-    for intent_id in sorted(expected):
-        expected_status, expected_event_id, expected_updated_at = expected[intent_id]
 
+    for intent_id in sorted(expected_submission):
+        expected_status = expected_submission[intent_id]
         inbox_status = inbox.get(intent_id)
         if inbox_status is None:
             errors.append(f"MISSING_INBOX_ROW:{intent_id}")
         elif inbox_status != expected_status:
             errors.append(f"INTENT_STATUS_MISMATCH:{intent_id}")
 
+    for intent_id in sorted(expected):
+        expected_status, expected_event_id, expected_updated_at, expected_worker_name = expected[
+            intent_id
+        ]
         projection_entry = projection.get(intent_id)
+
         if projection_entry is None:
             errors.append(f"INTENT_PROJECTION_MISMATCH:{intent_id}")
             continue
 
-        actual_status, actual_event_id, actual_updated_at = projection_entry
+        actual_status, actual_worker_name, actual_event_id, actual_updated_at = projection_entry
         if actual_status != expected_status:
+            errors.append(f"INTENT_PROJECTION_MISMATCH:{intent_id}")
+        if expected_worker_name is not None and actual_worker_name != expected_worker_name:
             errors.append(f"INTENT_PROJECTION_MISMATCH:{intent_id}")
         if actual_event_id != expected_event_id:
             errors.append(f"INTENT_PROJECTION_LAST_EVENT_ID_MISMATCH:{intent_id}")
         if actual_updated_at != expected_updated_at:
             errors.append(f"INTENT_PROJECTION_UPDATED_AT_MISMATCH:{intent_id}")
 
+    return errors
+
+
+def check_intent_transitions(events: list[dict]) -> list[str]:
+    """Replay each intent's events and verify every transition is legal.
+
+    Reuses leira.inbox.inbox.ALLOWED_INTENT_TRANSITIONS directly,
+    exactly the way check_lifecycle_transitions reuses
+    ALLOWED_TRANSITIONS for runs. The first event for any intent_id
+    must be intent_submitted or intent_rejected; anything else as a
+    first event is already illegal.
+    """
+    errors: list[str] = []
+    last_event_type_by_intent: dict[str, str] = {}
+    for event in events:
+        event_type = event["event_type"]
+        if event_type not in INTENT_LEDGER_EVENT_TYPES:
+            continue
+        payload = _parse_payload(event)
+        if payload is None:
+            continue
+        intent_id = payload.get("intent_id")
+        if not isinstance(intent_id, str) or not intent_id:
+            continue
+
+        previous_event_type = last_event_type_by_intent.get(intent_id)
+        if previous_event_type is None:
+            if event_type not in ("intent_submitted", "intent_rejected"):
+                errors.append(f"ILLEGAL_TRANSITION:{event['id']}")
+        elif event_type not in ALLOWED_INTENT_TRANSITIONS.get(previous_event_type, []):
+            errors.append(f"ILLEGAL_TRANSITION:{event['id']}")
+
+        last_event_type_by_intent[intent_id] = event_type
+    return errors
+
+
+def check_duplicate_claims(events: list[dict]) -> list[str]:
+    """No intent_id may be claimed (intent_claimed) more than once."""
+    errors: list[str] = []
+    seen: set[str] = set()
+    for event in events:
+        if event["event_type"] != "intent_claimed":
+            continue
+        payload = _parse_payload(event)
+        if payload is None:
+            continue
+        intent_id = payload.get("intent_id")
+        if not isinstance(intent_id, str) or not intent_id:
+            continue
+        if intent_id in seen:
+            errors.append(f"DUPLICATE_CLAIM:{intent_id}")
+        seen.add(intent_id)
+    return errors
+
+
+def check_worker_name_consistency(events: list[dict]) -> list[str]:
+    """worker_name on intent_completed/intent_failed must match the claim's.
+
+    worker_name is provenance, not routing -- but provenance that
+    silently changed mid-dispatch would be exactly the kind of quiet
+    drift an auditor exists to catch.
+    """
+    errors: list[str] = []
+    claimed_worker_name: dict[str, str] = {}
+    for event in events:
+        event_type = event["event_type"]
+        if event_type not in ("intent_claimed", "intent_completed", "intent_failed"):
+            continue
+        payload = _parse_payload(event)
+        if payload is None:
+            continue
+        intent_id = payload.get("intent_id")
+        worker_name = payload.get("worker_name")
+        if not isinstance(intent_id, str) or not intent_id:
+            continue
+
+        if event_type == "intent_claimed":
+            if isinstance(worker_name, str):
+                claimed_worker_name[intent_id] = worker_name
+            continue
+
+        expected_worker_name = claimed_worker_name.get(intent_id)
+        if expected_worker_name is not None and worker_name != expected_worker_name:
+            errors.append(f"WORKER_NAME_MISMATCH:{event['id']}")
     return errors
 
 
@@ -392,6 +537,9 @@ def audit(ledger: LedgerKernel) -> AuditResult:
     errors.extend(check_run_id_presence(events))
     errors.extend(check_lifecycle_transitions(events))
     errors.extend(check_artifact_schema(events))
+    errors.extend(check_intent_transitions(events))
+    errors.extend(check_duplicate_claims(events))
+    errors.extend(check_worker_name_consistency(events))
 
     projection_errors = check_projections(ledger, events)
     errors.extend(projection_errors)

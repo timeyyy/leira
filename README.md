@@ -1,4 +1,4 @@
-# Leira v0 / v0.1 / v0.2 / v0.3 / v0.4 / v0.5 / v0.6 / v0.7 / v0.8 / v0.9
+# Leira v0 / v0.1 / v0.2 / v0.3 / v0.4 / v0.5 / v0.6 / v0.7 / v0.8 / v0.9 / v1.0
 
 The smallest honest local event ledger, the smallest possible gate on
 starting work, the smallest possible run lifecycle, the smallest
@@ -6,7 +6,8 @@ possible seam for a worker to attach to it, the smallest external
 adapter on top of that seam, the smallest repository witness, the
 smallest general guest door for hosting any worker, the smallest
 disposable view over all of it, the smallest machine that checks its
-own work, and the smallest durable door for intent to enter through.
+own work, the smallest durable door for intent to enter through, and
+the smallest mechanical actuator that can perform one piece of work.
 
 This is **not** an agent system and **not** an orchestrator. v0 is the
 kernel underneath all of that: a single-process, single-writer, SQLite-backed,
@@ -128,6 +129,33 @@ The auditor gained matching, additive checks
 variants) using the exact same read-only, recompute-in-memory pattern
 as the run-projection checks. "Intent enters. Execution waits."
 
+v1.0 adds the single dispatcher: ``dispatch_once(ledger, lifecycle,
+intent_id, worker) -> DispatchResult`` in
+``leira/dispatcher/dispatcher.py``. The caller supplies both the
+intent and the worker explicitly, every time — no lookup, no choice,
+no internal loop; dispatching one hundred intents means calling
+``dispatch_once`` one hundred times. Execution states
+(``PENDING``/``RUNNING``/``COMPLETED``/``FAILED``) are layered onto the
+intent lifecycle from v0.9 via three new ledger event types
+(``intent_claimed``, ``intent_completed``, ``intent_failed``); the
+existing run lifecycle (``state_running``/``artifact_written``) is
+reused completely unmodified by wrapping each dispatch in a real run
+via the unmodified ``LifecycleKernel``. ``COMPLETED``/``FAILED`` (and
+``REJECTED``) are immutable terminal states — a second
+``dispatch_once`` on a terminal or already-``RUNNING`` intent is
+refused with ``error_type="INVALID_STATUS"``, never a double
+execution. The ``Worker`` protocol (``leira/workers/base.py``) gained a
+required ``name`` field: recorded as provenance in every artifact and
+claim/completion event, never read back to choose or look up a worker.
+The auditor gained matching checks reusing the same
+``ALLOWED_INTENT_TRANSITIONS`` replay pattern as run transitions
+(``DUPLICATE_CLAIM``, ``WORKER_NAME_MISMATCH``, and ``ILLEGAL_TRANSITION``
+for any event after a terminal intent state) — and both
+``rebuild_intent_projection()`` and the auditor's own expected-state
+computation now stop at the first terminal event per intent_id, so a
+later illegal event in history can never look like the truth, only
+like the violation it is.
+
 ## What's here
 
 ```
@@ -140,6 +168,7 @@ leira/
     worker.py            # Worker protocol, DeterministicStubWorker, run_worker_once()
     shell.py             # run_command(), run_shell_once()
     git.py               # inspect_repo(), run_git_status_once()
+    dispatcher.py         # dispatch_once() -> DispatchResult
     schema.sql           # ledger_events table + append-only triggers
     test_kernel.py
     test_envelope.py
@@ -147,9 +176,10 @@ leira/
     test_worker.py
     test_shell.py
     test_git.py
+    test_dispatcher.py
   workers/
     __init__.py
-    base.py              # Worker protocol, EchoWorker/FailingWorker/ExplodingWorker, run_worker_once()
+    base.py              # Worker protocol (name + invoke()), EchoWorker/FailingWorker/ExplodingWorker, run_worker_once()
     test_base.py
   projection/
     __init__.py
@@ -162,7 +192,7 @@ leira/
     test_auditor.py
   inbox/
     __init__.py
-    inbox.py               # InboxKernel.submit_intent(), rebuild_intent_projection()
+    inbox.py               # InboxKernel.submit_intent(), get_intent_status(), rebuild_intent_projection()
     test_inbox.py
 op.yaml                  # example operation envelope
 ```
@@ -203,22 +233,23 @@ parse diffs, and never interpret ``.gitignore``. Large repositories may
 make ``git status --porcelain`` slow; that is inherited honestly, not
 optimized away — Leira does not cache or schedule git inspection.
 
-## Explicitly deferred (not in v0 / v0.1 / v0.2 / v0.3 / v0.4 / v0.5 / v0.6 / v0.7 / v0.8 / v0.9)
+## Explicitly deferred (not in v0 / v0.1 / v0.2 / v0.3 / v0.4 / v0.5 / v0.6 / v0.7 / v0.8 / v0.9 / v1.0)
 
-Intent execution, claiming, queues, priorities, workers consuming the
-inbox, stale-intent cleanup, any reaper or cleaner, automatic repair,
-repair suggestions, rebuild during audit, anomaly scoring, monitoring
-or background audits, materialized views, indexing optimization,
-caching layers, a query planner, search, analytics, dashboards,
-subscriptions, streaming, pubsub, notifications, summaries, LLM
-projections or explanations, OpenAI/Claude/Gemini adapters, MCP,
+Queues, scheduling beyond one explicit call, a worker registry or
+lookup, load balancing, automatic claiming, multiple/parallel
+dispatch, stale-intent cleanup, any reaper or cleaner, automatic
+repair, repair suggestions, rebuild during audit, anomaly scoring,
+monitoring or background audits, materialized views, indexing
+optimization, caching layers, a query planner, search, analytics,
+dashboards, subscriptions, streaming, pubsub, notifications, summaries,
+LLM projections or explanations, OpenAI/Claude/Gemini adapters, MCP,
 sandboxing, environment isolation, secret filtering, quotas, approval
 tokens, a conductor loop, routing, multi-process access, a network
 service, a claim registry, belief_promoted events, convergence
-receipts, semantic validation, falsifiability evaluation, operation/run
-execution, retries, timeouts, cleanup logic, artifact file storage,
-parallelism, memory across calls, prompt generation, conversation
-history, agent loops, worker orchestration, tool choice, git
+receipts, semantic validation, falsifiability evaluation, retries,
+timeouts, cleanup logic, artifact file storage, parallelism, memory
+across calls, prompt generation, conversation history, agent loops,
+worker orchestration, tool choice, git
 add/commit/push/pull/fetch/merge/rebase, branch creation, diff parsing,
 .gitignore interpretation, remote synchronization.
 

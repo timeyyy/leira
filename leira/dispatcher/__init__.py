@@ -37,8 +37,15 @@ from .git import (
     inspect_repo,
     run_git_status_once,
 )
+from .dispatcher import (
+    DISPATCHER_WORKER_ID,
+    DispatchResult,
+    dispatch_once,
+)
 
 __all__ = [
+    "DISPATCHER_WORKER_ID",
+    "DispatchResult",
     "ALLOWED_TRANSITIONS",
     "ArtifactValidationError",
     "AppendResult",
@@ -58,6 +65,7 @@ __all__ = [
     "WorkerRunResult",
     "canonicalize_payload",
     "compute_event_hash",
+    "dispatch_once",
     "inspect_repo",
     "load_and_validate",
     "load_operation",
