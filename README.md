@@ -1,9 +1,10 @@
-# Leira v0 / v0.1 / v0.2 / v0.3 / v0.4 / v0.5
+# Leira v0 / v0.1 / v0.2 / v0.3 / v0.4 / v0.5 / v0.6
 
 The smallest honest local event ledger, the smallest possible gate on
 starting work, the smallest possible run lifecycle, the smallest
 possible seam for a worker to attach to it, the smallest external
-adapter on top of that seam, and the smallest repository witness.
+adapter on top of that seam, the smallest repository witness, and the
+smallest general guest door for hosting any worker.
 
 This is **not** an agent system and **not** an orchestrator. v0 is the
 kernel underneath all of that: a single-process, single-writer, SQLite-backed,
@@ -54,6 +55,20 @@ no add, commit, push, pull, fetch, merge, or rebase — and never parses
 a diff or interprets ``.gitignore``. "Git introduces provenance. Before
 inviting another mind, the workshop should learn to remember itself."
 
+v0.6 adds the general worker protocol — the guest door any future
+worker attaches through: ``Worker.invoke(inputs: dict) -> WorkerResult``,
+three reference workers (``EchoWorker``, ``FailingWorker``,
+``ExplodingWorker``), and ``run_worker_once()`` in ``leira/workers/base.py``.
+This is deliberately a *different* ``WorkerResult`` than the one in
+``leira/dispatcher/worker.py`` — worker success ("the work succeeded")
+is never conflated with kernel success ("Leira recorded the event
+correctly"). A worker that fails, or raises, still gets a fully
+recorded run (the exception is captured as ``error_type="UNEXPECTED"``,
+never propagated); only a failed ledger append skips
+``state_completed``. Reuses the existing lifecycle/append machinery
+exactly as the shell and git adapters do — no new state machine, no
+new table, no special path.
+
 ## What's here
 
 ```
@@ -73,6 +88,10 @@ leira/
     test_worker.py
     test_shell.py
     test_git.py
+  workers/
+    __init__.py
+    base.py              # Worker protocol, EchoWorker/FailingWorker/ExplodingWorker, run_worker_once()
+    test_base.py
 op.yaml                  # example operation envelope
 ```
 
@@ -112,22 +131,22 @@ parse diffs, and never interpret ``.gitignore``. Large repositories may
 make ``git status --porcelain`` slow; that is inherited honestly, not
 optimized away — Leira does not cache or schedule git inspection.
 
-## Explicitly deferred (not in v0 / v0.1 / v0.2 / v0.3 / v0.4 / v0.5)
+## Explicitly deferred (not in v0 / v0.1 / v0.2 / v0.3 / v0.4 / v0.5 / v0.6)
 
-Projections, snapshots, real workers, OpenAI/Claude/Gemini adapters,
-sandboxing, environment isolation, secret filtering, quotas, approval
-tokens, a conductor loop, routing, MCP, multi-process access, a network
-service, dashboards, a claim registry, belief_promoted events,
-convergence receipts, semantic validation, falsifiability evaluation,
-operation/run execution, retries, timeouts, cleanup logic, artifact
-file storage, parallelism, memory across calls, prompt generation,
-agent loops, git add/commit/push/pull/fetch/merge/rebase, branch
-creation, diff parsing, .gitignore interpretation, remote
-synchronization, caching.
+Projections, snapshots, OpenAI/Claude/Gemini adapters, MCP, sandboxing,
+environment isolation, secret filtering, quotas, approval tokens, a
+conductor loop, routing, multi-process access, a network service,
+dashboards, a claim registry, belief_promoted events, convergence
+receipts, semantic validation, falsifiability evaluation, operation/run
+execution, retries, timeouts, cleanup logic, artifact file storage,
+parallelism, memory across calls, prompt generation, conversation
+history, agent loops, worker orchestration, tool choice, streaming, git
+add/commit/push/pull/fetch/merge/rebase, branch creation, diff parsing,
+.gitignore interpretation, remote synchronization, caching.
 
 ## Running the tests
 
 ```
 pip install -r requirements.txt
-python3 -m pytest leira/dispatcher/ -v
+python3 -m pytest leira/ -v
 ```
