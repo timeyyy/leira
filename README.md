@@ -1,8 +1,9 @@
-# Leira v0 / v0.1 / v0.2 / v0.3
+# Leira v0 / v0.1 / v0.2 / v0.3 / v0.4
 
 The smallest honest local event ledger, the smallest possible gate on
-starting work, the smallest possible run lifecycle, and the smallest
-possible seam for a worker to attach to it.
+starting work, the smallest possible run lifecycle, the smallest
+possible seam for a worker to attach to it, and the smallest external
+adapter on top of that seam.
 
 This is **not** an agent system and **not** an orchestrator. v0 is the
 kernel underneath all of that: a single-process, single-writer, SQLite-backed,
@@ -32,6 +33,15 @@ synchronous — a hanging worker hangs the process; v0.3 does not add a
 timeout, thread, or async to prevent that. A worker is a test fixture
 here, not a mind.
 
+v0.4 adds the shell adapter: ``run_command()`` runs one external command
+as an explicit argument list (never ``shell=True``, never a shell
+string) and returns a typed ``CommandResult`` — a non-zero exit code or
+a timeout is just data, never a kernel failure. ``run_shell_once()``
+records the outcome through the same lifecycle as the worker seam,
+truncating oversized stdout/stderr deterministically to stay under
+``MAX_ARTIFACT_BYTES``. "The first external intelligence invited into
+the workshop is the operating system. Not another mind."
+
 ## What's here
 
 ```
@@ -42,11 +52,13 @@ leira/
     envelope.py         # load_operation(), validate_operation(), load_and_validate()
     lifecycle.py         # LifecycleKernel: create_run(), append_lifecycle_event(), get_run_state()
     worker.py            # Worker protocol, DeterministicStubWorker, run_worker_once()
+    shell.py             # run_command(), run_shell_once()
     schema.sql           # ledger_events table + append-only triggers
     test_kernel.py
     test_envelope.py
     test_lifecycle.py
     test_worker.py
+    test_shell.py
 op.yaml                  # example operation envelope
 ```
 
@@ -67,14 +79,26 @@ This is tamper-*evidence* for one trusted process talking to its own
 database — not a security boundary against an adversary who can already
 run code or edit files on the same machine.
 
-## Explicitly deferred (not in v0 / v0.1 / v0.2 / v0.3)
+## Security scope: the shell adapter specifically
 
-Projections, snapshots, real workers, shell/OpenAI/Claude/Gemini
-adapters, quotas, approval tokens, a conductor loop, routing, MCP,
-multi-process access, a network service, dashboards, a claim registry,
-belief_promoted events, convergence receipts, semantic validation,
-falsifiability evaluation, operation/run execution, retries, timeouts,
-cleanup logic, artifact file storage, parallelism, memory across calls.
+``run_command`` / ``run_shell_once`` are **not** a sandbox:
+- the command inherits the full Leira process environment
+- the command runs with the same filesystem permissions as Leira
+- v0.4 does not isolate secrets, filesystem access, CPU, or memory
+
+If you would not run a command directly in this process's own shell, do
+not hand it to this module.
+
+## Explicitly deferred (not in v0 / v0.1 / v0.2 / v0.3 / v0.4)
+
+Projections, snapshots, real workers, OpenAI/Claude/Gemini adapters,
+sandboxing, environment isolation, secret filtering, quotas, approval
+tokens, a conductor loop, routing, MCP, multi-process access, a network
+service, dashboards, a claim registry, belief_promoted events,
+convergence receipts, semantic validation, falsifiability evaluation,
+operation/run execution, retries, timeouts, cleanup logic, artifact
+file storage, parallelism, memory across calls, prompt generation,
+agent loops.
 
 ## Running the tests
 

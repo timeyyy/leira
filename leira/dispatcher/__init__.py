@@ -27,11 +27,17 @@ from .worker import (
     WorkerRunResult,
     run_worker_once,
 )
+from .shell import (
+    CommandResult,
+    run_command,
+    run_shell_once,
+)
 
 __all__ = [
     "ALLOWED_TRANSITIONS",
     "ArtifactValidationError",
     "AppendResult",
+    "CommandResult",
     "ContractResult",
     "DeterministicStubWorker",
     "GENESIS_PARENT_HASH",
@@ -48,6 +54,8 @@ __all__ = [
     "compute_event_hash",
     "load_and_validate",
     "load_operation",
+    "run_command",
+    "run_shell_once",
     "run_worker_once",
     "validate_operation",
 ]
