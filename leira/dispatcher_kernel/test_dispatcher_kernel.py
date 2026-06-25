@@ -12,6 +12,10 @@ from leira.dispatcher_kernel.dispatcher import (
     run_dispatcher_kernel,
     dispatcher_kernel_markdown,
     write_dispatcher_kernel,
+    DispatchPlanReceipt,
+    build_dispatch_plan_receipt,
+    dispatch_plan_receipt_json,
+    write_dispatcher_kernel_receipt,
 )
 from leira.dispatcher.kernel import LedgerKernel
 from leira.inbox.inbox import InboxKernel
@@ -252,3 +256,142 @@ def test_provenance_notice_present():
     result = run_dispatcher_kernel(record)
     markdown = dispatcher_kernel_markdown(result)
     assert PROVENANCE_NOTICE in markdown
+
+
+def test_immutable_receipt_dataclass():
+    record = _record()
+    result = run_dispatcher_kernel(record)
+    path = "some/path.md"
+    sha = "some-sha"
+    receipt = build_dispatch_plan_receipt(result, path, sha)
+    with pytest.raises(FrozenInstanceError):
+        receipt.dispatch_id = "other"
+
+
+def test_exact_receipt_fields():
+    record = _record()
+    result = run_dispatcher_kernel(record)
+    path = "some/path.md"
+    sha = "some-sha"
+    receipt = build_dispatch_plan_receipt(result, path, sha)
+    
+    expected_fields = {
+        "dispatch_id",
+        "subject_id",
+        "subject_kind",
+        "dispatch_type",
+        "target_label",
+        "execution_mode",
+        "reason_codes",
+        "dispatch_summary",
+        "dispatch_plan_path",
+        "dispatch_plan_sha256",
+        "provenance_notice",
+    }
+    import dataclasses
+    fields = {f.name for f in dataclasses.fields(receipt)}
+    assert fields == expected_fields
+
+
+def test_deterministic_receipt_creation():
+    record = _record()
+    result = run_dispatcher_kernel(record)
+    path = "some/path.md"
+    sha = "some-sha"
+    receipt1 = build_dispatch_plan_receipt(result, path, sha)
+    receipt2 = build_dispatch_plan_receipt(result, path, sha)
+    assert receipt1 == receipt2
+
+
+def test_deterministic_json_rendering():
+    record = _record()
+    result = run_dispatcher_kernel(record)
+    path = "some/path.md"
+    sha = "some-sha"
+    receipt = build_dispatch_plan_receipt(result, path, sha)
+    
+    json_str1 = dispatch_plan_receipt_json(receipt)
+    json_str2 = dispatch_plan_receipt_json(receipt)
+    assert json_str1 == json_str2
+    assert json_str1.endswith("\n")
+    
+    lines = json_str1.splitlines()
+    assert lines[0] == "{"
+    assert lines[-1] == "}"
+    
+    keys_order = [
+        "dispatch_id",
+        "subject_id",
+        "subject_kind",
+        "dispatch_type",
+        "target_label",
+        "execution_mode",
+        "reason_codes",
+        "dispatch_summary",
+        "dispatch_plan_path",
+        "dispatch_plan_sha256",
+        "provenance_notice",
+    ]
+    
+    import json
+    loaded = json.loads(json_str1)
+    assert list(loaded.keys()) == keys_order
+
+
+def test_byte_identical_repeated_receipt_writes(tmp_path):
+    record = _record()
+    result = run_dispatcher_kernel(record)
+    path = write_dispatcher_kernel(result, tmp_path)
+    
+    import hashlib
+    content = (tmp_path / path).read_bytes()
+    sha = hashlib.sha256(content).hexdigest()
+    
+    receipt = build_dispatch_plan_receipt(result, path, sha)
+    
+    receipt_path1 = write_dispatcher_kernel_receipt(receipt, tmp_path)
+    receipt_bytes1 = (tmp_path / receipt_path1).read_bytes()
+    
+    receipt_path2 = write_dispatcher_kernel_receipt(receipt, tmp_path)
+    receipt_bytes2 = (tmp_path / receipt_path2).read_bytes()
+    
+    assert receipt_path1 == receipt_path2
+    assert receipt_bytes1 == receipt_bytes2
+    assert receipt_path1 == f".leira/dispatcher_kernel_receipts/{record.dispatch_id}.dispatch_plan_receipt.json"
+
+
+def test_sha256_matches_written_dispatch_plan_bytes(tmp_path):
+    record = _record()
+    result = run_dispatcher_kernel(record)
+    path = write_dispatcher_kernel(result, tmp_path)
+    
+    import hashlib
+    plan_bytes = (tmp_path / path).read_bytes()
+    expected_sha = hashlib.sha256(plan_bytes).hexdigest()
+    
+    receipt = build_dispatch_plan_receipt(result, path, expected_sha)
+    assert receipt.dispatch_plan_sha256 == expected_sha
+
+
+def test_receipt_validation_errors():
+    with pytest.raises(TypeError):
+        build_dispatch_plan_receipt("not-a-result", "path.md", "sha")
+    with pytest.raises(TypeError):
+        build_dispatch_plan_receipt(run_dispatcher_kernel(_record()), 123, "sha")
+    with pytest.raises(TypeError):
+        build_dispatch_plan_receipt(run_dispatcher_kernel(_record()), "path.md", 123)
+    with pytest.raises(ValueError):
+        build_dispatch_plan_receipt(run_dispatcher_kernel(_record()), "", "sha")
+    with pytest.raises(ValueError):
+        build_dispatch_plan_receipt(run_dispatcher_kernel(_record()), "   ", "sha")
+    with pytest.raises(ValueError):
+        build_dispatch_plan_receipt(run_dispatcher_kernel(_record()), "path.md", "")
+    with pytest.raises(ValueError):
+        build_dispatch_plan_receipt(run_dispatcher_kernel(_record()), "path.md", "   ")
+
+    with pytest.raises(TypeError):
+        dispatch_plan_receipt_json("not-a-receipt")
+        
+    with pytest.raises(TypeError):
+        write_dispatcher_kernel_receipt("not-a-receipt")
+
