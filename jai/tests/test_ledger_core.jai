@@ -2,6 +2,37 @@
 #import,file "../src/ledger_core.jai";
 #import,file "../src/sha256.jai";
 
+make_reference_ledger :: () -> Memory_Ledger {
+    ledger: Memory_Ledger;
+    append_event_canonical(
+        *ledger,
+        "event-1",
+        "task_started",
+        "worker-1",
+        "{\"task\":\"build\"}",
+        "2026-01-01T00:00:00+00:00",
+    );
+    append_event_canonical(
+        *ledger,
+        "event-2",
+        "task_finished",
+        "worker-1",
+        "{\"n\":2}",
+        "2026-01-01T00:00:01+00:00",
+    );
+    append_event_canonical(
+        *ledger,
+        "event-3",
+        "artifact_written",
+        "worker-1",
+        "{\"path\":\"output.txt\"}",
+        "2026-01-01T00:00:02+00:00",
+        artifact_hash = "artifact-sha-123",
+        has_artifact_hash = true,
+    );
+    return ledger;
+}
+
 main :: () {
     print("Running test_ledger_core...\n");
 
@@ -100,6 +131,65 @@ main :: () {
     assert(ledger.events[2].parent_event_hash == second_append.event_hash);
     assert(ledger.events[2].has_artifact_hash);
     assert(ledger.events[2].artifact_hash == "artifact-sha-123");
+
+    empty_ledger: Memory_Ledger;
+    empty_validation := validate_chain(*empty_ledger);
+    assert(empty_validation.success);
+    assert(empty_validation.events_checked == 0);
+
+    valid_validation := validate_chain(*ledger);
+    assert(valid_validation.success);
+    assert(valid_validation.events_checked == 3);
+
+    wrong_genesis := make_reference_ledger();
+    wrong_genesis.events[0].parent_event_hash = "bad-parent";
+    wrong_genesis_validation := validate_chain(*wrong_genesis);
+    assert(!wrong_genesis_validation.success);
+    assert(wrong_genesis_validation.error_type == "CHAIN_BROKEN");
+    assert(wrong_genesis_validation.failed_event_id == "event-1");
+    assert(wrong_genesis_validation.events_checked == 0);
+
+    broken_second_parent := make_reference_ledger();
+    broken_second_parent.events[1].parent_event_hash = GENESIS_PARENT_HASH;
+    broken_second_parent_validation := validate_chain(*broken_second_parent);
+    assert(!broken_second_parent_validation.success);
+    assert(broken_second_parent_validation.error_type == "CHAIN_BROKEN");
+    assert(broken_second_parent_validation.failed_event_id == "event-2");
+    assert(broken_second_parent_validation.events_checked == 1);
+
+    tampered_payload := make_reference_ledger();
+    tampered_payload.events[0].payload_json = "{\"task\":\"tampered\"}";
+    tampered_payload_validation := validate_chain(*tampered_payload);
+    assert(!tampered_payload_validation.success);
+    assert(tampered_payload_validation.error_type == "HASH_MISMATCH");
+    assert(tampered_payload_validation.failed_event_id == "event-1");
+    assert(tampered_payload_validation.events_checked == 0);
+
+    tampered_artifact := make_reference_ledger();
+    tampered_artifact.events[2].artifact_hash = "artifact-sha-tampered";
+    tampered_artifact_validation := validate_chain(*tampered_artifact);
+    assert(!tampered_artifact_validation.success);
+    assert(tampered_artifact_validation.error_type == "HASH_MISMATCH");
+    assert(tampered_artifact_validation.failed_event_id == "event-3");
+    assert(tampered_artifact_validation.events_checked == 2);
+
+    tampered_event_hash := make_reference_ledger();
+    tampered_event_hash.events[1].event_hash = "bad-hash";
+    tampered_event_hash_validation := validate_chain(*tampered_event_hash);
+    assert(!tampered_event_hash_validation.success);
+    assert(tampered_event_hash_validation.error_type == "HASH_MISMATCH");
+    assert(tampered_event_hash_validation.failed_event_id == "event-2");
+    assert(tampered_event_hash_validation.events_checked == 1);
+
+    reordered := make_reference_ledger();
+    first_event := reordered.events[0];
+    reordered.events[0] = reordered.events[1];
+    reordered.events[1] = first_event;
+    reordered_validation := validate_chain(*reordered);
+    assert(!reordered_validation.success);
+    assert(reordered_validation.error_type == "CHAIN_BROKEN");
+    assert(reordered_validation.failed_event_id == "event-2");
+    assert(reordered_validation.events_checked == 0);
 
     invalid_event := append_event_canonical(
         *ledger,

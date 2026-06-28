@@ -176,3 +176,49 @@ append_event_canonical :: (
         created_at = created_at,
     };
 }
+
+validate_chain :: (ledger: *Memory_Ledger) -> Validate_Chain_Result {
+    expected_parent_hash := GENESIS_PARENT_HASH;
+
+    for event: ledger.events {
+        if event.parent_event_hash != expected_parent_hash {
+            return Validate_Chain_Result.{
+                success = false,
+                events_checked = it_index,
+                failed_event_id = event.id,
+                error_type = "CHAIN_BROKEN",
+                message = "event parent_event_hash did not match expected previous hash",
+            };
+        }
+
+        hash_input := Event_Hash_Input.{
+            parent_event_hash = event.parent_event_hash,
+            event_type = event.event_type,
+            worker_id = event.worker_id,
+            artifact_hash = event.artifact_hash,
+            has_artifact_hash = event.has_artifact_hash,
+            payload_json = event.payload_json,
+            created_at = event.created_at,
+        };
+        recomputed := compute_event_hash(hash_input);
+        hash_matches := recomputed == event.event_hash;
+        free(recomputed);
+
+        if !hash_matches {
+            return Validate_Chain_Result.{
+                success = false,
+                events_checked = it_index,
+                failed_event_id = event.id,
+                error_type = "HASH_MISMATCH",
+                message = "stored event_hash did not match recomputed hash",
+            };
+        }
+
+        expected_parent_hash = event.event_hash;
+    }
+
+    return Validate_Chain_Result.{
+        success = true,
+        events_checked = ledger.events.count,
+    };
+}

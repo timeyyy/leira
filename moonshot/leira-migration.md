@@ -361,3 +361,87 @@ and storing artifact hash presence.
 Implement in-memory `validate_chain` over `Memory_Ledger`. This is the next
 smallest behaviour because it depends only on event order, parent hashes, stored
 event hashes, and `compute_event_hash`, all now available in Jai.
+
+## 2026-06-28 Milestone: In-Memory Chain Validation
+
+### Milestone
+
+Implemented Jai `validate_chain` over `Memory_Ledger`. The validator checks the
+genesis parent for the first event, verifies each later event points to the
+previous event hash, recomputes every event hash from stored fields, and returns
+a typed success/failure result.
+
+### Observations
+
+- Verified: Python `LedgerKernel.validate_chain` treats an empty ledger as
+  valid and returns `events_checked == 0`.
+- Verified: Python validates parent linkage before recomputing the stored event
+  hash for each row.
+- Verified: Python returns `CHAIN_BROKEN` when a stored parent hash differs from
+  the expected genesis/previous hash.
+- Verified: Python returns `HASH_MISMATCH` when recomputing an event hash from
+  stored fields does not match the stored `event_hash`.
+- Verified: Python reports `events_checked` as the number of prior valid events
+  before the failed event.
+- Verified: Jai tests cover empty ledger validity, valid one/two/three event
+  chains, wrong genesis parent, broken second parent, tampered payload, tampered
+  artifact hash, tampered stored event hash, and invalid in-memory event order.
+- Verified: Jai dynamic array assignment shares the underlying event storage in
+  the test setup. Tamper tests now build fresh ledgers rather than relying on
+  value-copy isolation.
+- Verified: `jai/run_tests.sh` passes after adding in-memory validation.
+- Verified: `python3 -m pytest leira/dispatcher/test_kernel.py -q` passes
+  12/12 for the Python reference tests relevant to ledger validation.
+
+### Inferences
+
+- Pretty sure: matching Python's check order matters because some corruptions
+  can be classified differently depending on whether parent linkage or hash
+  recomputation is checked first.
+- Pretty sure: a separate in-memory validation slice was worthwhile because it
+  exposed Jai collection-copy semantics before persistence made debugging
+  harder.
+- Guessing: payload canonicalization is now a better next slice than SQLite,
+  because the in-memory ledger spine can already test append and validation
+  behaviour once Python-style payload inputs exist.
+
+### Lessons Learned
+
+- Do not assume dynamic array assignment creates an independent test fixture in
+  Jai. Build isolated fixtures explicitly for mutation tests.
+- Failure classification tests are as important as success tests for migration
+  fidelity.
+
+### Architectural Changes
+
+- Intentional deviation: validation runs over `Memory_Ledger` array order rather
+  than SQLite `rowid` order.
+- Intentional deviation: tampering is represented by mutating in-memory events,
+  not by bypassing SQLite triggers.
+- Intentional limitation: messages are stable but less detailed than Python's
+  f-string messages; tests assert error type, failed event id, and
+  `events_checked`.
+- No persistence, chain repair, DB trigger validation, payload canonicalization,
+  NFC normalization, event ID generation, or timestamp generation was added.
+
+### Remaining Work
+
+- Implement payload canonicalization and validation for a constrained JSON value
+  model.
+- Add Python-style append inputs on top of canonicalization.
+- Reconstruct SQLite persistence, append-only triggers, and durable
+  `validate_chain`.
+
+### Research Questions
+
+- Should Jai test fixtures use explicit clone helpers for dynamic arrays, or
+  should migration tests prefer rebuilding fixtures from operations?
+- How detailed should Jai error messages be before they become part of the
+  behavioural contract?
+
+### Recommended Next Slice
+
+Implement payload canonicalization for a constrained JSON value model: sorted
+string keys, compact separators, simple ASCII strings, integers, booleans, null,
+arrays, and rejection of floats/non-string keys where representable. This
+unlocks Python-style append inputs while still avoiding SQLite.
