@@ -281,3 +281,83 @@ canonicalization was added.
 Implement in-memory append semantics for caller-supplied canonical simple ASCII
 payload JSON. This uses the now-migrated `compute_event_hash` and unlocks
 hash-chain behaviour without introducing SQLite persistence yet.
+
+## 2026-06-28 Milestone: In-Memory Append Semantics
+
+### Milestone
+
+Implemented a Jai `Memory_Ledger` and `append_event_canonical` for
+caller-supplied canonical simple ASCII payload JSON. The slice reconstructs the
+deterministic part of Python `LedgerKernel.append_event`: choosing the parent
+hash from the ledger head, computing the event hash, preserving append order,
+and storing artifact hash presence.
+
+### Observations
+
+- Verified: Python `append_event` validates `event_type` and `worker_id` before
+  canonicalizing payloads or writing rows.
+- Verified: Python `append_event` uses `GENESIS_PARENT_HASH` for the first
+  event and the previous row's `event_hash` for the next event parent.
+- Verified: Python stores `artifact_hash` as nullable data and includes it in
+  the event hash preimage when present.
+- Verified: Python generates `event_id` with `uuid.uuid4()` and `created_at`
+  with `datetime.now(timezone.utc).isoformat()`. Jai does not generate these in
+  this slice; tests pass them explicitly to keep the slice deterministic.
+- Verified: Python-derived event hash vectors for a genesis append, second
+  append, and artifact append match Jai `append_event_canonical`.
+- Verified: Jai tests cover stored event order, genesis parent linkage, second
+  event parent linkage, artifact hash handling, invalid event type, and invalid
+  worker id.
+- Verified: `jai/run_tests.sh` passes after the in-memory append addition.
+- Verified: `python3 -m pytest leira/dispatcher/test_kernel.py -q` passes
+  12/12 for the Python reference tests relevant to append and chaining.
+
+### Inferences
+
+- Pretty sure: caller-supplied IDs and timestamps are the right boundary for
+  this slice because Python's generation behaviour is nondeterministic and not
+  necessary for testing parent/hash semantics.
+- Pretty sure: in-memory append gives enough structure to migrate chain
+  validation next without introducing SQLite.
+- Guessing: full payload canonicalization should wait until after in-memory
+  chain validation, because current tests can already exercise the ledger's hash
+  spine with supplied canonical payload JSON.
+
+### Lessons Learned
+
+- Splitting nondeterministic generation from deterministic append semantics
+  keeps the migration testable and faithful to the behaviour under examination.
+- Artifact hash support belongs in the append slice because Python includes it
+  in both the stored row and event hash preimage.
+
+### Architectural Changes
+
+- Intentional deviation: Jai append is in-memory only and does not use SQLite,
+  transactions, triggers, or DB error handling.
+- Intentional deviation: Jai append accepts already-canonical `payload_json`
+  instead of a Python-style payload object.
+- Intentional deviation: Jai append requires caller-supplied `event_id` and
+  `created_at`; UUID and timestamp generation remain out of scope.
+- Intentional limitation: no payload validation, NFC normalization, durable
+  append-only enforcement, or chain validation is implemented in this slice.
+
+### Remaining Work
+
+- Implement in-memory `validate_chain` over `Memory_Ledger`.
+- Add full payload canonicalization and validation.
+- Reconstruct SQLite persistence and append-only triggers.
+- Decide how Jai should handle event ID and timestamp generation once durable
+  append exists.
+
+### Research Questions
+
+- Should nondeterministic generation remain outside the core append function in
+  Jai, even after persistence exists, to preserve deterministic testability?
+- Can SQLite persistence reuse the same in-memory append core, or should it
+  mirror Python's transaction boundary more directly?
+
+### Recommended Next Slice
+
+Implement in-memory `validate_chain` over `Memory_Ledger`. This is the next
+smallest behaviour because it depends only on event order, parent hashes, stored
+event hashes, and `compute_event_hash`, all now available in Jai.

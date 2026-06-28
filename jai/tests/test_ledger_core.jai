@@ -50,6 +50,81 @@ main :: () {
     assert(second_hash == "cdb7f440152453b38247ef2bccdac306580bbd7f74f28baf02a02f01176c394c");
     free(second_hash);
 
+    ledger: Memory_Ledger;
+    first_append := append_event_canonical(
+        *ledger,
+        "event-1",
+        "task_started",
+        "worker-1",
+        "{\"task\":\"build\"}",
+        "2026-01-01T00:00:00+00:00",
+    );
+    assert(first_append.success);
+    assert(first_append.event_id == "event-1");
+    assert(first_append.created_at == "2026-01-01T00:00:00+00:00");
+    assert(first_append.event_hash == "50df03cc9575ddde71e06e6d054768b6eb7ad81b0cc0ddb00ff27406ea9414b7");
+    assert(ledger.events.count == 1);
+    assert(ledger.events[0].parent_event_hash == GENESIS_PARENT_HASH);
+    assert(ledger.events[0].event_hash == first_append.event_hash);
+    assert(!ledger.events[0].has_artifact_hash);
+
+    second_append := append_event_canonical(
+        *ledger,
+        "event-2",
+        "task_finished",
+        "worker-1",
+        "{\"n\":2}",
+        "2026-01-01T00:00:01+00:00",
+    );
+    assert(second_append.success);
+    assert(second_append.event_hash == "f3fca179ff6764700554af35e193c6e015af7c490a8d80c1b39ce714d828b564");
+    assert(ledger.events.count == 2);
+    assert(ledger.events[0].id == "event-1");
+    assert(ledger.events[1].id == "event-2");
+    assert(ledger.events[1].parent_event_hash == first_append.event_hash);
+    assert(ledger.events[1].parent_event_hash == ledger.events[0].event_hash);
+
+    third_append := append_event_canonical(
+        *ledger,
+        "event-3",
+        "artifact_written",
+        "worker-1",
+        "{\"path\":\"output.txt\"}",
+        "2026-01-01T00:00:02+00:00",
+        artifact_hash = "artifact-sha-123",
+        has_artifact_hash = true,
+    );
+    assert(third_append.success);
+    assert(third_append.event_hash == "aea0024b8899fd96c8d495c275896848798381e13798a06a916017e9adb14a41");
+    assert(ledger.events.count == 3);
+    assert(ledger.events[2].parent_event_hash == second_append.event_hash);
+    assert(ledger.events[2].has_artifact_hash);
+    assert(ledger.events[2].artifact_hash == "artifact-sha-123");
+
+    invalid_event := append_event_canonical(
+        *ledger,
+        "event-4",
+        "",
+        "worker-1",
+        "{\"task\":\"build\"}",
+        "2026-01-01T00:00:03+00:00",
+    );
+    assert(!invalid_event.success);
+    assert(invalid_event.error_type == "INVALID_EVENT_TYPE");
+    assert(ledger.events.count == 3);
+
+    invalid_worker := append_event_canonical(
+        *ledger,
+        "event-4",
+        "task_started",
+        "",
+        "{\"task\":\"build\"}",
+        "2026-01-01T00:00:03+00:00",
+    );
+    assert(!invalid_worker.success);
+    assert(invalid_worker.error_type == "INVALID_WORKER_ID");
+    assert(ledger.events.count == 3);
+
     empty_hash := sha256_hex("");
     assert(empty_hash == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
     assert(empty_hash.count == SHA256_HEX_LENGTH);

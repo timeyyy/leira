@@ -34,6 +34,10 @@ Ledger_Event :: struct {
     created_at: string;
 }
 
+Memory_Ledger :: struct {
+    events: [..] Ledger_Event;
+}
+
 Event_Hash_Input :: struct {
     parent_event_hash: string;
     event_type: string;
@@ -105,4 +109,70 @@ render_event_hash_input :: (input: Event_Hash_Input) -> string {
 compute_event_hash :: (input: Event_Hash_Input) -> string {
     preimage := render_event_hash_input(input);
     return sha256_hex(preimage);
+}
+
+head_hash :: (ledger: *Memory_Ledger) -> string {
+    if ledger.events.count == 0 return GENESIS_PARENT_HASH;
+    return ledger.events[ledger.events.count - 1].event_hash;
+}
+
+append_event_canonical :: (
+    ledger: *Memory_Ledger,
+    event_id: string,
+    event_type: string,
+    worker_id: string,
+    payload_json: string,
+    created_at: string,
+    artifact_hash: string = "",
+    has_artifact_hash: bool = false,
+    operation_id: string = "",
+) -> Append_Result {
+    if event_type.count == 0 {
+        return Append_Result.{
+            success = false,
+            error_type = "INVALID_EVENT_TYPE",
+            message = "event_type must be a non-empty string",
+        };
+    }
+
+    if worker_id.count == 0 {
+        return Append_Result.{
+            success = false,
+            error_type = "INVALID_WORKER_ID",
+            message = "worker_id must be a non-empty string",
+        };
+    }
+
+    parent := head_hash(ledger);
+    hash_input := Event_Hash_Input.{
+        parent_event_hash = parent,
+        event_type = event_type,
+        worker_id = worker_id,
+        artifact_hash = artifact_hash,
+        has_artifact_hash = has_artifact_hash,
+        payload_json = payload_json,
+        created_at = created_at,
+    };
+    event_hash := compute_event_hash(hash_input);
+
+    event := Ledger_Event.{
+        id = event_id,
+        operation_id = operation_id,
+        parent_event_hash = parent,
+        event_type = event_type,
+        worker_id = worker_id,
+        payload_json = payload_json,
+        artifact_hash = artifact_hash,
+        has_artifact_hash = has_artifact_hash,
+        event_hash = event_hash,
+        created_at = created_at,
+    };
+    array_add(*ledger.events, event);
+
+    return Append_Result.{
+        success = true,
+        event_id = event_id,
+        event_hash = event_hash,
+        created_at = created_at,
+    };
 }

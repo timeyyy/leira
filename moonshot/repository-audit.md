@@ -46,13 +46,12 @@ See `moonshot/behavioural-dependency-map.md` for the living migration dashboard.
 1. Establish additive `jai/` and `moonshot/` directories while leaving Python in
    place.
 2. Reconstruct v0 pure ledger helpers: constants, result structs, canonical
-   event-hash input, SHA-256, and `compute_event_hash` for already-canonical
-   simple ASCII inputs.
-3. Reconstruct in-memory append semantics for caller-supplied canonical
-   payload JSON.
+   event-hash input, SHA-256, `compute_event_hash`, and in-memory append
+   semantics for caller-supplied canonical simple ASCII inputs.
+3. Reconstruct in-memory `validate_chain`.
 4. Reconstruct payload canonicalization and its rejection rules.
 5. Reconstruct SQLite ledger append and append-only protection.
-6. Reconstruct `validate_chain` and v0 tests.
+6. Reconstruct durable `validate_chain` and v0 tests.
 7. Move forward version-by-version through lifecycle, workers, adapters,
    projections, audit, inbox, dispatcher, registry, claims, receipts, and the
    deterministic engineering-flow layers.
