@@ -18,16 +18,37 @@ main :: () {
     };
 
     rendered := render_event_hash_input(input);
-    expected := "{\"artifact_hash\":null,\"created_at\":\"2026-01-01T00:00:00+00:00\",\"event_type\":\"task_started\",\"parent_event_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"payload_json\":{\"task\":\"build\"},\"worker_id\":\"worker-1\"}";
+    expected := "{\"artifact_hash\":null,\"created_at\":\"2026-01-01T00:00:00+00:00\",\"event_type\":\"task_started\",\"parent_event_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"payload_json\":\"{\\\"task\\\":\\\"build\\\"}\",\"worker_id\":\"worker-1\"}";
 
     assert(rendered == expected);
+
+    event_hash := compute_event_hash(input);
+    assert(event_hash == "50df03cc9575ddde71e06e6d054768b6eb7ad81b0cc0ddb00ff27406ea9414b7");
+    free(event_hash);
 
     input.has_artifact_hash = true;
     input.artifact_hash = "abc123";
     rendered_with_artifact := render_event_hash_input(input);
-    expected_with_artifact := "{\"artifact_hash\":\"abc123\",\"created_at\":\"2026-01-01T00:00:00+00:00\",\"event_type\":\"task_started\",\"parent_event_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"payload_json\":{\"task\":\"build\"},\"worker_id\":\"worker-1\"}";
+    expected_with_artifact := "{\"artifact_hash\":\"abc123\",\"created_at\":\"2026-01-01T00:00:00+00:00\",\"event_type\":\"task_started\",\"parent_event_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"payload_json\":\"{\\\"task\\\":\\\"build\\\"}\",\"worker_id\":\"worker-1\"}";
 
     assert(rendered_with_artifact == expected_with_artifact);
+
+    event_hash_with_artifact := compute_event_hash(input);
+    assert(event_hash_with_artifact == "f7ba93aa999146112b06e39e3427b4701301c7bf17cbb40d82bc22bebe00359a");
+    free(event_hash_with_artifact);
+
+    second_input := Event_Hash_Input.{
+        parent_event_hash = "1111111111111111111111111111111111111111111111111111111111111111",
+        event_type = "step",
+        worker_id = "w",
+        artifact_hash = "",
+        has_artifact_hash = false,
+        payload_json = "{\"i\":1,\"label\":\"step-1\"}",
+        created_at = "2026-01-02T03:04:05+00:00",
+    };
+    second_hash := compute_event_hash(second_input);
+    assert(second_hash == "cdb7f440152453b38247ef2bccdac306580bbd7f74f28baf02a02f01176c394c");
+    free(second_hash);
 
     empty_hash := sha256_hex("");
     assert(empty_hash == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");

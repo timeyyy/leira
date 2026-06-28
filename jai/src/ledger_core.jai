@@ -1,5 +1,6 @@
 #import "Basic";
 #import "String";
+#import,file "sha256.jai";
 
 GENESIS_PARENT_HASH :: "0000000000000000000000000000000000000000000000000000000000000000";
 
@@ -43,10 +44,37 @@ Event_Hash_Input :: struct {
     created_at: string;
 }
 
+append_ascii_byte :: (builder: *String_Builder, c: u8) {
+    bytes: [1] u8;
+    bytes[0] = c;
+    s: string;
+    s.data = bytes.data;
+    s.count = 1;
+    append(builder, s);
+}
+
+escape_json_ascii_string :: (value: string) -> string {
+    // This slice is intentionally limited to already-canonical simple ASCII
+    // inputs. It only escapes the characters needed by the Python reference
+    // vectors in this milestone: quote and backslash.
+    builder: String_Builder;
+    for 0..value.count-1 {
+        c := value[it];
+        if c == #char "\"" {
+            append(*builder, "\\\"");
+        } else if c == #char "\\" {
+            append(*builder, "\\\\");
+        } else {
+            append_ascii_byte(*builder, c);
+        }
+    }
+    return builder_to_string(*builder);
+}
+
 render_json_string_field :: (name: string, value: string) -> string {
-    // Milestone 1 assumes prevalidated simple ASCII field values. The Python
-    // reference still owns full JSON escaping and Unicode normalization.
-    return tprint("\"%\":\"%\"", name, value);
+    escaped := escape_json_ascii_string(value);
+    defer free(escaped);
+    return tprint("\"%\":\"%\"", name, escaped);
 }
 
 render_json_raw_field :: (name: string, value: string) -> string {
@@ -69,8 +97,12 @@ render_event_hash_input :: (input: Event_Hash_Input) -> string {
         render_json_string_field("created_at", input.created_at),
         render_json_string_field("event_type", input.event_type),
         render_json_string_field("parent_event_hash", input.parent_event_hash),
-        render_json_raw_field("payload_json", input.payload_json),
+        render_json_string_field("payload_json", input.payload_json),
         render_json_string_field("worker_id", input.worker_id),
     );
 }
 
+compute_event_hash :: (input: Event_Hash_Input) -> string {
+    preimage := render_event_hash_input(input);
+    return sha256_hex(preimage);
+}

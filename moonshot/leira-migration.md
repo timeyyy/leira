@@ -199,3 +199,85 @@ Implement `compute_event_hash` for already-canonical simple ASCII inputs by
 combining `render_event_hash_input` with `sha256_hex`. This is the next smallest
 slice because both dependencies now exist and it unlocks hash-chain behaviour
 before SQLite persistence.
+
+## 2026-06-28 Milestone: `compute_event_hash` for Simple Canonical Inputs
+
+### Milestone
+
+Implemented Jai `compute_event_hash` for already-canonical simple ASCII event
+inputs. The function composes the existing event-hash preimage renderer with the
+Jai SHA-256 primitive. No persistence, event identity, caching, or payload
+canonicalization was added.
+
+### Observations
+
+- Verified: Python `compute_event_hash` builds a dict with keys
+  `artifact_hash`, `created_at`, `event_type`, `parent_event_hash`,
+  `payload_json`, and `worker_id`, serializes it with
+  `json.dumps(sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+  allow_nan=False)`, then hashes the UTF-8 bytes with SHA-256.
+- Verified: `payload_json` is embedded as a JSON string value in the hash
+  preimage, not as raw JSON. For example, `{"task":"build"}` becomes
+  `"payload_json":"{\"task\":\"build\"}"` inside the outer preimage.
+- Verified: Python reference vectors were generated directly from
+  `leira.dispatcher.kernel.compute_event_hash` for no-artifact,
+  artifact-present, and second-parent simple ASCII cases.
+- Verified: Jai `render_event_hash_input` was corrected to escape quote and
+  backslash characters for the simple ASCII scope.
+- Verified: `jai/run_tests.sh` passes with Python-derived preimage and digest
+  vectors.
+- Verified: `python3 -m pytest leira/dispatcher/test_kernel.py -q` passes
+  12/12 for the Python reference suite relevant to this slice.
+- Verified: freeing the `render_event_hash_input` result inside
+  `compute_event_hash` caused a runtime crash. The implementation now follows
+  the existing renderer ownership pattern and does not free that `tprint` result
+  internally.
+
+### Inferences
+
+- Pretty sure: preimage-level tests are necessary in addition to final digest
+  tests because the previous Jai renderer had a plausible but wrong raw-JSON
+  interpretation of `payload_json`.
+- Pretty sure: ownership conventions around `tprint`/builder strings need to be
+  made explicit before larger Jai slices introduce many transient strings.
+- Guessing: constraining this slice to already-canonical ASCII inputs is the
+  right tradeoff because it exposes the true hash contract without forcing a
+  premature JSON value model.
+
+### Lessons Learned
+
+- Preserve behaviour over elegance: the important fact is Python's exact nested
+  JSON string representation, not a cleaner typed representation.
+- Generate vectors from the Python oracle at the start of each slice, especially
+  when there is any ambiguity about serialization boundaries.
+- Runtime execution remains mandatory after compilation for memory ownership
+  mistakes.
+
+### Architectural Changes
+
+- Intentional limitation: Jai `compute_event_hash` does not perform NFC
+  normalization. The slice assumes already-canonical simple ASCII strings.
+- Intentional limitation: Jai JSON escaping currently covers quote and
+  backslash, which is enough for the current simple ASCII vectors. Control
+  characters, non-ASCII, and full `json.dumps` parity remain pending.
+- No persistence, caching, event-id generation, or timestamp generation was
+  introduced.
+
+### Remaining Work
+
+- Add in-memory append semantics for caller-supplied canonical payload JSON.
+- Reconstruct full payload canonicalization and validation.
+- Reconstruct SQLite append-only storage and `validate_chain`.
+
+### Research Questions
+
+- Should transient string ownership rules be documented in a small Jai migration
+  style note before the ledger grows more string-heavy?
+- Is it better to implement full JSON canonicalization before in-memory append,
+  or continue with supplied canonical payloads to reach chain behaviour sooner?
+
+### Recommended Next Slice
+
+Implement in-memory append semantics for caller-supplied canonical simple ASCII
+payload JSON. This uses the now-migrated `compute_event_hash` and unlocks
+hash-chain behaviour without introducing SQLite persistence yet.
