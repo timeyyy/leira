@@ -16,15 +16,20 @@ Those omissions are intentional: the first milestone establishes a small
 buildable Jai surface that mirrors the Python `compute_event_hash` preimage
 ordering before expanding into persistence.
 
-## Intended Build
+## Build And Test
+
+```bash
+jai/run_tests.sh
+```
+
+The script uses `JAI_COMPILER_PATH` when set, then falls back to the Honkerworks
+local compiler path `/root/programming/jai/bin/jai-linux`, and finally to `jai`
+on `PATH`.
+
+Manual equivalent:
 
 ```bash
 cd jai
-jai build.jai
+/root/programming/jai/bin/jai-linux build.jai
+./tests/test_ledger_core
 ```
-
-This should compile the test executable into `jai/tests/` once the Jai compiler
-is available on `PATH`. In the current environment, `command -v jai` returns no
-compiler. Running `jai build.jai` from inside this directory currently reports a
-shell-level permission error because `jai` resolves to this directory name
-rather than a compiler executable.
