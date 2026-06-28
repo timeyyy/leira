@@ -126,3 +126,76 @@ preimage used by Python `leira.dispatcher.kernel.compute_event_hash`.
   data structures compared with Python dataclasses plus SQLite?
 - Should Leira's future Jai API preserve Python's typed failure objects exactly,
   or collapse some repeated result shapes after behavioural parity is proven?
+
+## 2026-06-28 Milestone: SHA-256 Primitive
+
+### Milestone
+
+Added the next smallest behavioural slice: deterministic SHA-256 hex digests in
+Jai for byte/string input. This ports the behaviour of
+`leira.workspace.hashing.sha256` without migrating workspace persistence.
+
+### Observations
+
+- Verified: `leira.workspace.hashing.sha256` is a pure wrapper around
+  `hashlib.sha256(content).hexdigest()`.
+- Verified: `leira/workspace/test_workspace.py::test_sha256_computed_correctly`
+  is the direct Python reference test for artifact digest behaviour.
+- Verified: the Jai implementation is self-contained in `jai/src/sha256.jai`;
+  it does not shell out and does not use Python or OpenSSL.
+- Verified: Jai SHA-256 tests cover the empty string, `hello`, `abc`, and a
+  64-byte input that crosses the padding/block boundary.
+- Verified: the first SHA-256 implementation compiled but failed the empty
+  string vector. The defect was in big-endian word loading: `cast(u32)
+  bytes[offset] << 24` did not produce the intended promoted-byte shift.
+- Verified: rewriting byte promotion into explicit temporaries fixed the digest
+  vectors.
+- Verified: `jai/run_tests.sh` compiles and executes the current Jai tests
+  successfully after the SHA-256 addition.
+- Verified: `python3 -m pytest leira/workspace/test_workspace.py::test_sha256_computed_correctly -q`
+  passes for the Python reference.
+
+### Inferences
+
+- Pretty sure: explicit intermediate variables are safer than compact cast/shift
+  expressions in Jai code written by migration agents.
+- Pretty sure: SHA-256 is a useful bridge primitive because it unlocks both
+  `compute_event_hash` and future artifact descriptor migration.
+- Guessing: keeping SHA-256 self-contained will improve portability for the
+  research migration, at the cost of maintaining a small crypto primitive that
+  should remain narrowly scoped and vector-tested.
+
+### Lessons Learned
+
+- Compile success is not enough for numeric code; known vectors are mandatory.
+- For bit-level Jai code, prefer boring explicit casts and temporaries over
+  expression density.
+
+### Architectural Changes
+
+- Intentional deviation: Python delegates SHA-256 to `hashlib`; Jai now has a
+  local SHA-256 implementation. Behaviour is intended to match Python's digest
+  output exactly for byte input.
+- Intentional limitation: this slice does not yet connect SHA-256 to
+  `render_event_hash_input`, artifact files, or SQLite ledger rows.
+
+### Remaining Work
+
+- Implement Jai `compute_event_hash` by hashing `render_event_hash_input`.
+- Add JSON string escaping and canonical payload support.
+- Reconstruct append semantics and chain validation.
+
+### Research Questions
+
+- Should the Jai implementation keep a local SHA-256 primitive long term, or
+  replace it with a vetted library binding once the migration reaches production
+  hardening?
+- What other Jai expression forms need defensive style guidance for migration
+  agents?
+
+### Recommended Next Slice
+
+Implement `compute_event_hash` for already-canonical simple ASCII inputs by
+combining `render_event_hash_input` with `sha256_hex`. This is the next smallest
+slice because both dependencies now exist and it unlocks hash-chain behaviour
+before SQLite persistence.

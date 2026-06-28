@@ -39,17 +39,19 @@ The Python suite is broad and should be mined for migration milestones rather
 than ported wholesale in one pass. Start with pure deterministic units, then move
 to persistence and replay.
 
+See `moonshot/behavioural-dependency-map.md` for the living migration dashboard.
+
 ## Migration Plan
 
 1. Establish additive `jai/` and `moonshot/` directories while leaving Python in
    place.
 2. Reconstruct v0 pure ledger helpers: constants, result structs, canonical
-   event-hash input, SHA-256.
-3. Reconstruct payload canonicalization and its rejection rules.
-4. Reconstruct SQLite ledger append and append-only protection.
-5. Reconstruct `validate_chain` and v0 tests.
-6. Move forward version-by-version through lifecycle, workers, adapters,
+   event-hash input, and SHA-256.
+3. Reconstruct `compute_event_hash` for already-canonical inputs.
+4. Reconstruct payload canonicalization and its rejection rules.
+5. Reconstruct SQLite ledger append and append-only protection.
+6. Reconstruct `validate_chain` and v0 tests.
+7. Move forward version-by-version through lifecycle, workers, adapters,
    projections, audit, inbox, dispatcher, registry, claims, receipts, and the
    deterministic engineering-flow layers.
-7. Update the migration journal after every meaningful milestone.
-
+8. Update the migration journal after every meaningful milestone.
