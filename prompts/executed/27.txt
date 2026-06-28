@@ -1,0 +1,497 @@
+Implement Leira v2.7: Status View
+
+Mission
+
+Extend Leira from a machine that explains history into a machine that can expose current state.
+
+The goal is not dashboards.
+
+The goal is not monitoring.
+
+The goal is not notifications.
+
+The goal is to provide a deterministic, read-only view of the workshop.
+
+The machine must be able to say:
+
+> These are the current intents.
+>
+> These are the current claims.
+>
+> These are the current sessions.
+>
+> These are the current minds.
+>
+> These are the current proposals.
+>
+> No state was changed.
+>
+> No recommendation was made.
+
+Nothing more.
+
+Hard Constraints
+
+* Python only.
+* SQLite only.
+* Single process only.
+* Blocking only.
+* Library, not service.
+* No threads.
+* No async.
+* No daemon.
+* No notifications.
+* No subscriptions.
+* No polling loops.
+* No event creation.
+* No repairs.
+* No projection rebuild.
+* No ledger walking for primary view state.
+* No filesystem scanning.
+* No Git inspection.
+* No environment inspection.
+* No shell execution.
+* No dispatch.
+* No inbox submission.
+* No recommendations.
+* No warnings.
+* No urgency scoring.
+* No agent loops.
+
+Do not redesign:
+
+* ledger
+* projections
+* receipts
+* archive
+* workspace
+* provenance
+* environment
+* proposals
+* approvals
+* sessions
+* registry
+* claims
+* audit
+* audit report
+
+Adapt existing structure minimally.
+
+Files
+
+```text
+leira/
+  views/
+    status.py
+    test_status.py
+```
+
+Mission
+
+Views observe.
+
+Views do not control.
+
+Views do not judge.
+
+Nothing more.
+
+Core Types
+
+Implement:
+
+```python
+@dataclass(frozen=True)
+class IntentStatus:
+    intent_id: str
+    status: str
+```
+
+Implement:
+
+```python
+@dataclass(frozen=True)
+class ClaimStatus:
+    intent_id: str
+    owner_id: str
+```
+
+Implement:
+
+```python
+@dataclass(frozen=True)
+class SessionStatus:
+    session_id: str
+    intent_count: int
+```
+
+Implement:
+
+```python
+@dataclass(frozen=True)
+class ProposalStatus:
+    proposal_id: str
+    status: str
+```
+
+Implement:
+
+```python
+@dataclass(frozen=True)
+class MindStatus:
+    mind_name: str
+```
+
+Implement:
+
+```python
+@dataclass(frozen=True)
+class StatusView:
+    intents: list[IntentStatus]
+    claims: list[ClaimStatus]
+    sessions: list[SessionStatus]
+    proposals: list[ProposalStatus]
+    minds: list[MindStatus]
+    generated_at: str
+```
+
+API
+
+Implement:
+
+```python
+get_status_view(
+    generated_at: str | None = None
+) -> StatusView
+```
+
+Implement:
+
+```python
+format_status_view(
+    view: StatusView
+) -> str
+```
+
+Rules
+
+StatusView is derived.
+
+StatusView is disposable.
+
+StatusView is not stored.
+
+StatusView is not authoritative.
+
+The ledger remains truth.
+
+The projections serve the view.
+
+Nothing more.
+
+Data Sources
+
+StatusView must read only from projections:
+
+* intent_projection
+* intent_claim_projection
+* session_projection
+* proposal_projection
+* proposal_decision_projection
+* mind_projection
+
+Never scan current filesystem.
+
+Never inspect current Git state.
+
+Never invoke workers.
+
+Never rebuild projections.
+
+Never walk the ledger as the primary source for current state.
+
+Never inspect live environment.
+
+Snapshot Read Rule
+
+Generate the view inside a single read transaction where practical.
+
+The view should observe a consistent database snapshot.
+
+Do not hold write locks.
+
+Do not block execution longer than necessary.
+
+Generated Timestamp
+
+The only new timestamp allowed is:
+
+```python
+generated_at
+```
+
+Allow fixed timestamp injection for deterministic tests.
+
+If omitted, generate current UTC timestamp.
+
+Determinism
+
+Sort:
+
+Intents:
+
+```python
+intent_id
+```
+
+Claims:
+
+```python
+intent_id
+```
+
+Sessions:
+
+```python
+session_id
+```
+
+Proposals:
+
+```python
+proposal_id
+```
+
+Minds:
+
+```python
+mind_name
+```
+
+Projection Semantics
+
+StatusView reflects the known projected state.
+
+If the ledger contains data that has not been rebuilt or projected, StatusView should not infer it.
+
+That is correct.
+
+Views observe projections.
+
+Auditors verify projections.
+
+Rebuilders repair projections.
+
+StatusView does none of those jobs.
+
+Proposal Status Rule
+
+Proposal status should be derived mechanically:
+
+* if proposal has no decision, status is PENDING
+* if proposal_decision_projection says APPROVED, status is APPROVED
+* if proposal_decision_projection says REJECTED, status is REJECTED
+
+Do not infer from execution.
+
+Do not infer from inbox.
+
+Do not infer from claims.
+
+Kernel Rules
+
+Views do not:
+
+* repair
+* mutate
+* notify
+* dispatch
+* rank
+* prioritize
+* interpret
+* recommend
+* warn
+* assign urgency
+
+They expose state.
+
+Nothing more.
+
+Human Formatting
+
+`format_status_view` should be deterministic plain text.
+
+Example:
+
+```text
+Generated At: 2026-01-01T00:00:00Z
+
+Intents
+intent_001 COMPLETED
+intent_002 RUNNING
+
+Claims
+intent_002 owned by worker_01
+
+Sessions
+session_alpha 3 intents
+
+Proposals
+proposal_01 APPROVED
+proposal_02 PENDING
+
+Minds
+Claude:sonnet
+EchoMind
+OpenAI:gpt-5
+```
+
+Formatting Rules
+
+* deterministic ordering
+* stable section order
+* stable formatting
+* optional fixed-width padding is allowed
+* no recommendations
+* no warnings
+* no speculation
+* no explanations
+* no repair suggestions
+
+Failure Model
+
+Empty system is valid.
+
+No intents is valid.
+
+No claims is valid.
+
+No sessions is valid.
+
+No proposals is valid.
+
+No minds is valid.
+
+The view describes.
+
+It does not judge.
+
+Stress Test
+
+Generate:
+
+```text
+100 intents
+30 claims
+20 sessions
+50 proposals
+5 minds
+```
+
+Verify:
+
+* view generation succeeds
+* ordering deterministic
+* formatting deterministic
+* no state mutation occurs
+
+Tests
+
+Required tests
+
+1. view generated.
+2. view deterministic with fixed generated_at.
+3. formatting deterministic.
+4. view does not mutate state.
+5. view does not append events.
+6. view does not rebuild projections.
+7. view does not walk ledger for primary status.
+8. view does not invoke workers.
+9. view does not scan filesystem.
+10. view does not inspect Git.
+11. view does not inspect environment.
+12. view reads projections only.
+13. empty system produces valid view.
+14. sorting deterministic.
+15. generated_at injectable.
+16. proposal without decision appears PENDING.
+17. approved proposal appears APPROVED.
+18. rejected proposal appears REJECTED.
+19. no recommendation text generated.
+20. no warning text generated.
+21. no urgency scoring exists.
+22. no shell execution occurs.
+23. no dispatch occurs.
+24. no notifications exist.
+25. format output stable.
+26. validate_chain() independent.
+27. audit independent.
+28. status view remains read-only.
+29. 100-intent stress test passes.
+
+Explicitly Deferred
+
+* dashboards
+* web UI
+* notifications
+* subscriptions
+* websockets
+* polling
+* monitoring
+* alerts
+* ranking
+* prioritization
+* warning generation
+* urgency detection
+* self-healing
+* planning
+* agents
+* orchestration
+
+Definition of Done
+
+Leira can expose current projected state.
+
+Not control it.
+
+Views are observation.
+
+Not authority.
+
+The ledger remains truth.
+
+Reports explain history.
+
+Views expose state.
+
+Auditors verify disagreement.
+
+Nothing more.
+
+Remember:
+
+Workers think.
+
+Minds think.
+
+Minds suggest.
+
+Humans approve.
+
+Kernel gates.
+
+Ledger remembers.
+
+Projections serve.
+
+Auditors verify.
+
+Reports explain.
+
+Views observe.
+
+Truth lives in receipts.
+
+Build observation.
+
+Do not build control.

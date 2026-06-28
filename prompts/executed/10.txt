@@ -1,0 +1,536 @@
+Implement Leira v0.9: Inbox
+
+Mission
+
+Extend Leira from a machine that verifies into a machine that accepts work.
+
+The goal is not orchestration.
+
+The goal is not execution.
+
+The goal is to prove that intent can enter the workshop mechanically, durably, and without interpretation.
+
+The machine must be able to say:
+
+> Work was requested.
+>
+> Here is exactly what was requested.
+>
+> The request was accepted or rejected.
+>
+> Nothing has executed yet.
+
+Nothing more.
+
+Hard Constraints
+
+* Python only.
+* SQLite only.
+* Single process only.
+* Blocking only.
+* Library, not service.
+* No threads.
+* No async.
+* No daemon.
+* No routing.
+* No retries.
+* No scheduler.
+* No priorities.
+* No queues yet.
+* No memory.
+* No background tasks.
+* No reaper.
+* No cleaner.
+* No agent loops.
+* No LLM calls.
+* No automatic execution.
+
+Do not redesign:
+
+* ledger
+* envelope
+* lifecycle
+* shell adapter
+* git adapter
+* worker protocol
+* projection engine
+* auditor
+
+Adapt existing structure minimally.
+
+Files
+
+```text
+leira/
+  inbox/
+    inbox.py
+    test_inbox.py
+```
+
+Mission
+
+Intent enters.
+
+Execution waits.
+
+The inbox is a durable buffer.
+
+Not a dispatcher.
+
+Not a scheduler.
+
+Not a queue runner.
+
+Pending work may accumulate.
+
+That is honest.
+
+Do not clean it automatically.
+
+Architecture Boundary
+
+Partition the layer clearly:
+
+```text
+Ingress:        inbox_entries
+Authority:      ledger_events
+Representation: intent_projection
+```
+
+Ledger remains truth.
+
+Inbox rows are durable ingress records.
+
+Projections are disposable views.
+
+Schema
+
+Create:
+
+```text
+inbox_entries
+```
+
+Fields:
+
+```python
+intent_id
+created_at
+intent_type
+payload_json
+status
+```
+
+Use:
+
+```python
+intent_id
+```
+
+as the global identifier for the unit of requested work.
+
+The same intent_id must appear in:
+
+* inbox_entries
+* ledger events
+* intent_projection
+
+Status values:
+
+```text
+PENDING
+REJECTED
+```
+
+No:
+
+```text
+RUNNING
+COMPLETED
+FAILED
+```
+
+Execution belongs elsewhere.
+
+Intent Envelope
+
+Implement:
+
+```python
+@dataclass(frozen=True)
+class IntentEnvelope:
+    intent_id: str
+    created_at: str
+    intent_type: str
+    payload: dict
+```
+
+Rules
+
+Intent envelopes are immutable.
+
+Payload must be a dict.
+
+Payload must be JSON serializable.
+
+Intent type must be a non-empty string.
+
+Intent type is opaque.
+
+Payload meaning is opaque.
+
+The kernel does not interpret either.
+
+Examples
+
+Valid:
+
+```python
+intent_type="shell_command"
+
+payload={
+    "command": ["python", "--version"]
+}
+```
+
+Valid:
+
+```python
+intent_type="worker"
+
+payload={
+    "worker_name": "EchoWorker",
+    "inputs": {"message": "hello"}
+}
+```
+
+The kernel does not understand these.
+
+It preserves them.
+
+Inbox API
+
+Implement:
+
+```python
+submit_intent(
+    intent_type: str,
+    payload: dict
+) -> SubmitIntentResult
+```
+
+Typed Result
+
+Implement:
+
+```python
+@dataclass(frozen=True)
+class SubmitIntentResult:
+    success: bool
+    intent_id: str | None
+    status: str | None = None
+    error_type: str | None = None
+```
+
+Validation Rules
+
+Validation must be purely structural.
+
+Reject:
+
+* empty intent_type
+* non-string intent_type
+* missing payload
+* non-dict payload
+* non-JSON-serializable payload
+* malformed envelope
+
+Use typed failures.
+
+Do not raise operational exceptions for validation failure.
+
+Suggested error types:
+
+```python
+INVALID_ENVELOPE
+NON_SERIALIZABLE_PAYLOAD
+STORAGE_FAILURE
+```
+
+Acceptance Boundary
+
+Accepted intent means:
+
+```text
+Leira durably recorded the request.
+```
+
+Rejected intent means:
+
+```text
+Leira durably recorded why the request was rejected.
+```
+
+Neither means execution.
+
+Ledger Integration
+
+Accepted intent must append:
+
+```text
+intent_submitted
+```
+
+Rejected intent must append:
+
+```text
+intent_rejected
+```
+
+Intent history belongs in the ledger.
+
+Ledger event content must include:
+
+```python
+intent_id
+intent_type
+payload
+status
+error_type
+```
+
+Use one transaction for:
+
+* ledger event
+* inbox_entries row
+* intent_projection row
+
+Truth and ingress must not diverge.
+
+If storage fails:
+
+* return typed failure
+* do not pretend the intent was accepted
+* do not execute anything
+
+Inbox Rows
+
+Accepted intent creates:
+
+```python
+status="PENDING"
+```
+
+Rejected intent creates:
+
+```python
+status="REJECTED"
+```
+
+Rejected intents are still data.
+
+Do not discard them.
+
+Projection
+
+Create:
+
+```text
+intent_projection
+```
+
+Fields:
+
+```python
+intent_id
+status
+updated_at
+last_event_id
+```
+
+Projection is derived.
+
+Projection loss is recoverable.
+
+updated_at must come from the ledger event timestamp.
+
+Do not use datetime.now() during rebuild.
+
+Projection Rebuild
+
+Extend rebuild logic to reconstruct:
+
+```text
+intent_projection
+```
+
+from ledger events.
+
+Only ledger events determine projection state.
+
+Rebuild must be deterministic.
+
+Rebuild must be idempotent.
+
+Rebuild must be transactional.
+
+Audit
+
+Extend audit to verify:
+
+* inbox rows exist for intent events
+* intent_projection agrees with ledger
+* intent status agrees with ledger
+* intent_id is consistent across ledger, inbox, and projection
+* updated_at equals ledger event created_at
+* last_event_id equals the latest relevant ledger event id
+
+Audit remains read-only.
+
+Audit reports disagreement.
+
+It does not repair.
+
+Kernel Rules
+
+The kernel does not:
+
+* execute intents
+* interpret payloads
+* decide priorities
+* route work
+* schedule work
+* clean stale work
+* claim work
+
+The kernel records:
+
+* intent_id
+* intent_type
+* payload
+* status
+* error_type
+
+Intent is not execution.
+
+Failure Model
+
+Pending intent accumulation is not failure.
+
+Rejected intent is not catastrophe.
+
+Inbox corruption is recoverable from ledger where possible.
+
+Projection corruption is recoverable.
+
+Ledger corruption is not.
+
+Stress Test
+
+Submit:
+
+```text
+100 intents
+```
+
+Then delete:
+
+```text
+intent_projection
+```
+
+Verify audit reports projection disagreement.
+
+Run projection rebuild.
+
+Verify projection is restored exactly.
+
+Tests
+
+Required tests
+
+1. valid intent accepted.
+2. accepted intent returns status=PENDING.
+3. invalid intent rejected.
+4. rejected intent returns status=REJECTED.
+5. non-serializable payload rejected.
+6. empty intent_type rejected.
+7. non-string intent_type rejected.
+8. non-dict payload rejected.
+9. intent_submitted event appended.
+10. intent_rejected event appended.
+11. inbox row created for accepted intent.
+12. inbox row created for rejected intent.
+13. same intent_id appears in ledger, inbox_entries, and intent_projection.
+14. payload preserved exactly.
+15. stored payload JSON is deterministic.
+16. intent ids are unique.
+17. multiple intents coexist.
+18. no intent executes automatically.
+19. projection loss loses no truth.
+20. rebuild restores intent_projection.
+21. rebuild is deterministic and idempotent.
+22. updated_at comes from ledger timestamp.
+23. last_event_id comes from ledger event id.
+24. audit detects projection corruption.
+25. audit detects inbox/projection disagreement.
+26. audit remains read-only.
+27. typed failures preferred over exceptions.
+28. validate_chain() remains valid.
+29. 100-intent stress test passes.
+30. no reaper or cleaner exists.
+
+Explicitly Deferred
+
+* execution
+* scheduling
+* claiming
+* queues
+* priorities
+* routing
+* retries
+* stale intent cleanup
+* workers consuming inbox
+* OpenAI
+* Claude
+* Gemini
+* MCP
+* agent loops
+
+Definition of Done
+
+Leira can accept work without performing work.
+
+Intent is durable.
+
+Rejected intent is durable.
+
+Execution is separate.
+
+Requests survive.
+
+Pending work may accumulate honestly.
+
+Meaning belongs to workers.
+
+Mechanics belong to the kernel.
+
+Remember:
+
+Workers think.
+
+Kernel gates.
+
+Ledger remembers.
+
+Projections serve.
+
+Auditors verify.
+
+Intent enters.
+
+Execution waits.
+
+The workshop should learn how to receive requests
+
+before it learns how to act upon them.

@@ -1,0 +1,436 @@
+Implement Leira v0.6: Worker Adapter
+
+Mission
+
+Extend Leira from repository witness to worker witness.
+
+The goal is not intelligence.
+
+The goal is to prove Leira can host any worker through one deterministic interface and preserve what happened.
+
+The machine must be able to say:
+
+> A worker was invoked.
+>
+> Inputs were supplied.
+>
+> Outputs were returned.
+>
+> The worker succeeded or failed.
+>
+> The artifact was recorded or it was not.
+>
+> Here is exactly what happened.
+
+Nothing more.
+
+Hard Constraints
+
+* Python only.
+* SQLite only.
+* Single process only.
+* Blocking only.
+* Library, not service.
+* No threads.
+* No async.
+* No daemon.
+* No routing.
+* No retries.
+* No scheduler.
+* No quotas.
+* No memory.
+* No prompt generation.
+* No background tasks.
+* No agent loops.
+* No LLM calls yet.
+
+Do not redesign:
+
+* ledger
+* envelope
+* lifecycle
+* worker seam
+* shell adapter
+* git adapter
+
+Adapt existing structure minimally.
+
+Files
+
+```text
+leira/
+  workers/
+    base.py
+    test_base.py
+```
+
+Worker Protocol
+
+Implement:
+
+```python
+from typing import Protocol
+
+class Worker(Protocol):
+
+    def invoke(
+        self,
+        inputs: dict
+    ) -> WorkerResult:
+        ...
+```
+
+Worker Result
+
+Implement:
+
+```python
+@dataclass(frozen=True)
+class WorkerResult:
+    success: bool
+    outputs: dict
+    error_type: str | None = None
+    error_message: str = ""
+```
+
+Keep WorkerResult separate from kernel append/lifecycle results.
+
+Worker success means:
+
+```text
+the worker says the work succeeded
+```
+
+Kernel success means:
+
+```text
+Leira recorded the event correctly
+```
+
+Do not conflate them.
+
+Rules
+
+Workers own meaning.
+
+Kernel owns mechanics.
+
+Workers may succeed.
+
+Workers may fail.
+
+Workers may raise.
+
+Worker failure is data.
+
+Worker exceptions are data.
+
+Kernel append failure is different.
+
+Unexpected exceptions become:
+
+```python
+error_type="UNEXPECTED"
+```
+
+and are captured as typed worker results.
+
+Normal worker failures should not raise.
+
+Worker Artifact Schema
+
+```python
+{
+    "type": "worker_result",
+    "content": {
+        "worker_name": "...",
+        "inputs": {...},
+        "outputs": {...},
+        "worker_success": True,
+        "error_type": None,
+        "error_message": ""
+    }
+}
+```
+
+Store:
+
+```python
+worker_name
+```
+
+as a string identifier in the artifact.
+
+Six months later, the ledger must still reveal which guest produced which output.
+
+Artifact Size
+
+Enforce:
+
+```python
+MAX_ARTIFACT_BYTES
+```
+
+before artifact_written.
+
+Use deterministic JSON serialization before checking size:
+
+```python
+json.dumps(artifact, sort_keys=True, separators=(",", ":"))
+```
+
+If oversized, truncate deterministically while preserving valid JSON structure.
+
+Never truncate raw JSON text into invalid JSON.
+
+Prefer truncating large fields inside:
+
+```python
+inputs
+outputs
+error_message
+```
+
+Add:
+
+```python
+"truncated": True
+```
+
+to the artifact content.
+
+Lifecycle
+
+Implement:
+
+```python
+run_worker_once(
+    run_id,
+    worker_name,
+    worker,
+    inputs
+)
+```
+
+Sequence
+
+1.
+
+```text
+append state_running
+```
+
+2.
+
+```text
+invoke worker
+```
+
+3.
+
+```text
+convert worker result or exception into WorkerResult
+```
+
+4.
+
+```text
+create worker_result artifact
+```
+
+5.
+
+```text
+enforce MAX_ARTIFACT_BYTES
+```
+
+6.
+
+```text
+append artifact_written
+```
+
+7.
+
+```text
+append state_completed
+```
+
+Worker failure does not prevent completion.
+
+Worker exception does not prevent completion.
+
+Artifact append failure prevents completion.
+
+If artifact append fails:
+
+* do not append state_completed
+* return typed kernel failure
+* preserve enough information for the caller to know the artifact write failed
+
+Transition Discipline
+
+run_worker_once must not bypass lifecycle rules.
+
+It must use the same append and transition machinery as previous adapters.
+
+No special path.
+
+No hidden mutation.
+
+No direct state editing.
+
+Kernel Rules
+
+The kernel does not understand:
+
+* prompts
+* outputs
+* meaning
+* quality
+* usefulness
+* correctness
+
+The kernel records:
+
+* worker name
+* inputs
+* outputs
+* worker success
+* error type
+* error message
+
+The kernel is a witness.
+
+Not a judge.
+
+Reference Workers
+
+Create:
+
+```python
+class EchoWorker:
+```
+
+which returns:
+
+```python
+WorkerResult(
+    success=True,
+    outputs={
+        "echo": inputs
+    }
+)
+```
+
+Create:
+
+```python
+class FailingWorker:
+```
+
+which returns:
+
+```python
+WorkerResult(
+    success=False,
+    outputs={},
+    error_type="FAILURE",
+    error_message="simulated"
+)
+```
+
+Create:
+
+```python
+class ExplodingWorker:
+```
+
+which raises:
+
+```python
+RuntimeError("simulated explosion")
+```
+
+The kernel must capture it as:
+
+```python
+WorkerResult(
+    success=False,
+    outputs={},
+    error_type="UNEXPECTED",
+    error_message="simulated explosion"
+)
+```
+
+Tests
+
+Required tests
+
+1. EchoWorker succeeds.
+2. inputs are preserved.
+3. outputs are preserved.
+4. worker_name is recorded.
+5. worker_success is recorded separately from kernel success.
+6. FailingWorker is captured as worker_success=False.
+7. ExplodingWorker becomes error_type="UNEXPECTED".
+8. artifact_written is recorded.
+9. state_completed is recorded after worker failure.
+10. state_completed is recorded after worker exception.
+11. state_completed is not recorded after artifact append failure.
+12. validate_chain() still succeeds.
+13. lifecycle transitions are not skipped.
+14. run_worker_once uses existing append/transition machinery.
+15. oversized artifacts remain valid JSON.
+16. oversized artifacts are truncated deterministically.
+17. truncated artifacts include truncated=True.
+18. WorkerResult is not conflated with append/lifecycle result.
+19. typed results are preferred over exceptions.
+20. multiple workers share the same protocol.
+
+Explicitly Deferred
+
+* OpenAI
+* Claude
+* Gemini
+* MCP
+* prompt generation
+* conversation history
+* memory
+* retries
+* routing
+* scheduling
+* parallel execution
+* streaming
+* agent loops
+* worker orchestration
+* tool choice
+* semantic evaluation
+
+Definition of Done
+
+Leira can invoke arbitrary workers and preserve what happened.
+
+A worker failure is not a failed kernel.
+
+A worker exception is not a failed kernel.
+
+An artifact append failure is a kernel recording failure.
+
+Workers own intelligence.
+
+Kernel owns mechanics.
+
+Remember:
+
+The ledger provides memory.
+
+The lifecycle provides heartbeat.
+
+The worker protocol provides the guest door.
+
+Before inviting another mind,
+
+the workshop should first learn
+
+how to host guests.

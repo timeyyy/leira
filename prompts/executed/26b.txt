@@ -1,0 +1,326 @@
+# Leira v1.15 — Human Decision Record
+
+## Mission
+
+Implement the deterministic **Human Decision Record** slice.
+
+This slice preserves an explicit human decision about the current lifecycle state.
+
+It does **not** execute the decision.
+
+It does **not** dispatch work.
+
+It does **not** modify project state.
+
+It merely records that a human made a decision, why they made it, and which evidence informed it.
+
+The lifecycle becomes:
+
+```text
+Project State
+↓
+
+Prompt Draft
+↓
+
+Knowledge Gap
+↓
+
+Review Question
+↓
+
+Review Record
+↓
+
+Prompt Revision Record
+↓
+
+Human Decision Record
+```
+
+---
+
+# Architectural Review
+
+Leira now preserves:
+
+* uncertainty
+* questions
+* review evidence
+* prompt evolution
+
+The next missing piece is the human judgement that determines what should happen next.
+
+This decision is itself evidence.
+
+The dispatcher will eventually execute decisions.
+
+It must never invent them.
+
+---
+
+# Files
+
+Create:
+
+```text
+leira/human_decision/
+    __init__.py
+    decision.py
+    test_human_decision.py
+```
+
+Modify nothing else unless strictly necessary.
+
+---
+
+# Public API
+
+Create immutable dataclasses.
+
+## HumanDecision
+
+Fields:
+
+```text
+decision_id
+
+subject_id
+
+subject_kind
+
+decision_type
+
+reason_codes
+
+source_label
+
+review_record_ids
+
+prompt_revision_id
+
+decision_summary
+```
+
+All fields are caller supplied.
+
+No generated identifiers.
+
+No timestamps.
+
+No clocks.
+
+No UUIDs.
+
+No randomness.
+
+---
+
+## Supported decision types
+
+The module stores the supplied decision only.
+
+Suggested supported values:
+
+```text
+approve
+
+request_review
+
+continue_planning
+
+implement
+
+defer
+
+reject
+
+cancel
+
+custom
+```
+
+Unknown values are preserved exactly.
+
+The module performs no validation beyond deterministic storage.
+
+---
+
+# Functions
+
+Implement:
+
+```text
+create_human_decision(...)
+```
+
+Returns immutable HumanDecision.
+
+---
+
+Implement:
+
+```text
+human_decision_markdown(...)
+```
+
+Returns deterministic markdown.
+
+---
+
+Implement:
+
+```text
+write_human_decision(...)
+```
+
+Optional derived scratch writer.
+
+Writes:
+
+```text
+.leira/human_decisions/<decision_id>.decision.md
+```
+
+Derived output only.
+
+---
+
+# Markdown Format
+
+Render:
+
+```text
+# Human Decision Record
+
+## Decision ID
+
+...
+
+## Subject
+
+...
+
+## Subject Kind
+
+...
+
+## Decision Type
+
+...
+
+## Prompt Revision
+
+...
+
+## Review Records
+
+...
+
+## Source
+
+...
+
+## Reason Codes
+
+...
+
+## Decision Summary
+
+...
+
+## Provenance Notice
+
+This record preserves a human decision as evidence.
+
+It performs no dispatch, execution, approval logic, workflow transitions or planning.
+```
+
+Section order must never vary.
+
+---
+
+# Determinism Requirements
+
+Same inputs
+
+↓
+
+same object
+
+↓
+
+same markdown
+
+↓
+
+same file bytes
+
+No sorting.
+
+No inference.
+
+No automatic workflow transitions.
+
+No state mutation.
+
+Everything supplied by the caller is preserved exactly.
+
+---
+
+# Tests
+
+Create comprehensive pytest coverage.
+
+Verify:
+
+* immutable dataclass
+* deterministic object creation
+* deterministic markdown
+* deterministic file output
+* byte-identical repeated writes
+* decision type preserved exactly
+* review record ordering preserved exactly
+* reason code ordering preserved exactly
+* decision summary preserved exactly
+* no clocks
+* no timestamps
+* no UUIDs
+* no randomness
+* no generated identifiers
+* no dispatcher imports
+* no workflow execution
+* no planner
+* no AI calls
+* no ledger mutation
+
+---
+
+# Explicit Guardrails
+
+Do not implement:
+
+* dispatcher
+* workflow execution
+* approval engine
+* planner
+* state transitions
+* automatic promotion
+* CLI
+* AI adapters
+* browser automation
+* orchestration
+* ledger persistence
+* database
+
+---
+
+# Steward's Law
+
+Keep it boring.
+
+The kernel should preserve the fact that a human made a decision.
+
+The kernel must remain completely ignorant of what happens because of that decision.
+
+Execution belongs to future deterministic dispatch layers.

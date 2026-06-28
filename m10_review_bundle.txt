@@ -1,0 +1,165 @@
+===== GIT STATUS =====
+ M leira/execution_adapter_contract/__init__.py
+ M leira/execution_adapter_contract/contract.py
+ M leira/execution_adapter_contract/test_execution_adapter_contract.py
+?? .leira/
+?? dispatcher_kernel_verification_report.md
+?? execution_adapter_compatibility_verification_report.md
+?? execution_adapter_selection_verification_report.md
+?? leira/dispatch_draft/
+?? leira/dispatch_record/
+?? leira/engineering_kernel/
+?? leira/engineering_state_projection/
+?? leira/flow_policy_projection/
+?? leira/human_decision/
+?? leira/human_decision_commit/
+?? leira/human_decision_draft/
+?? leira/implementation_report/
+?? leira/lifecycle_projection/
+?? leira/missing_evidence_projection/
+?? leira/verification_prompt/
+?? leira/verification_record/
+?? m10_review_bundle.txt
+?? prompts/
+
+===== PYTEST =====
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.1.1, pluggy-1.6.0
+rootdir: /root/programming/repo/leira
+plugins: cov-7.1.0
+collected 914 items
+
+leira/archive/test_archive.py ................
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! KeyboardInterrupt !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+/root/programming/repo/leira/leira/dispatcher/kernel.py:284: KeyboardInterrupt
+(to show a full traceback on KeyboardInterrupt use --full-trace)
+============================= 16 passed in 30.67s ==============================
+
+===== TREE =====
+
+===== tools/run_leira_s_adapter.py =====
+
+===== tools/test_run_leira_s_adapter.py =====
+
+===== README (adapter section) =====
+
+```
+leira/
+  dispatcher/
+    __init__.py
+    kernel.py          # LedgerKernel: append_event(), validate_chain(); LedgerEvent dataclass
+    envelope.py         # load_operation(), validate_operation(), load_and_validate()
+    lifecycle.py         # LifecycleKernel: create_run(), append_lifecycle_event(), get_run_state()
+    worker.py            # Worker protocol, DeterministicStubWorker, run_worker_once()
+    shell.py             # run_command(), run_shell_once()
+    git.py               # inspect_repo(), run_git_status_once()
+    dispatcher.py         # dispatch_once() -> DispatchResult, dispatch_by_name(), dispatch_and_track()
+    schema.sql           # ledger_events table + append-only triggers
+    test_kernel.py
+    test_envelope.py
+    test_lifecycle.py
+    test_worker.py
+    test_shell.py
+    test_git.py
+    test_dispatcher.py
+  workers/
+    __init__.py
+    base.py              # Worker protocol (name + invoke()), EchoWorker/FailingWorker/ExplodingWorker, run_worker_once()
+    test_base.py
+  projection/
+    __init__.py
+    state.py              # ProjectionEngine: get_current_state(), update_from_event()
+    rebuild.py             # rebuild_projection()
+    test_projection.py
+  audit/
+    __init__.py
+    auditor.py             # audit() -> AuditResult
+    test_auditor.py
+  inbox/
+    __init__.py
+    inbox.py               # InboxKernel.submit_intent(), get_intent_status(), rebuild_intent_projection()
+    test_inbox.py
+  registry/
+    __init__.py
+    registry.py             # WorkerRegistry, RegisterResult, rebuild_worker_projection()
+    test_registry.py
+  claims/
+    __init__.py
+    claims.py                # ClaimKernel.claim_intent()/release_claim(), get_claim(), rebuild_claim_projection()
+    test_claims.py
+  receipts/
+    __init__.py
+    receipts.py               # get_receipt_bundle(), list_receipt_events(), export_receipt_bundle(), rebuild_receipt_projection()
+    test_receipts.py
+op.yaml                  # example operation envelope
+```
+
+## Security scope
+
+The hash chain protects against:
+- accidental mutation
+- silent corruption
+- replay mismatch (events linked out of order or to the wrong parent)
+
+The hash chain does **not** protect against:
+- a malicious local actor with write access to the SQLite file
+- a compromised kernel process
+- filesystem-level theft or tampering by someone who knows the scheme
+- multiple concurrent writers (no locking protocol, no OCC in v0)
+
+This is tamper-*evidence* for one trusted process talking to its own
+database — not a security boundary against an adversary who can already
+run code or edit files on the same machine.
+
+## Security scope: the shell adapter specifically
+
+``run_command`` / ``run_shell_once`` are **not** a sandbox:
+- the command inherits the full Leira process environment
+- the command runs with the same filesystem permissions as Leira
+- v0.4 does not isolate secrets, filesystem access, CPU, or memory
+
+If you would not run a command directly in this process's own shell, do
+not hand it to this module.
+
+## Security scope: the git adapter specifically
+
+``inspect_repo`` / ``run_git_status_once`` are read-only and inherit
+the same shell-adapter security scope above. They never mutate a
+repository, never run ``git add``/``commit``/``push``/``pull``, never
+parse diffs, and never interpret ``.gitignore``. Large repositories may
+make ``git status --porcelain`` slow; that is inherited honestly, not
+optimized away — Leira does not cache or schedule git inspection.
+
+## Explicitly deferred (not in v0 / v0.1 / v0.2 / v0.3 / v0.4 / v0.5 / v0.6 / v0.7 / v0.8 / v0.9 / v1.0 / v1.1 / v1.2 / v1.3)
+
+Queues, scheduling beyond one explicit call, routing, priorities,
+capabilities, tags, automatic/fuzzy worker selection, dependency
+injection, plugin loading, automatic discovery, dynamic imports,
+module scanning, load balancing, worker pools, automatic claiming,
+multiple/parallel dispatch, distributed coordination, leases, claim
+expiration, claim stealing, liveness checks, orphan cleanup, stale-
+intent cleanup, any reaper or cleaner, automatic repair/recovery,
+repair suggestions, rebuild during audit, anomaly scoring, monitoring
+or background audits, materialized views, indexing optimization,
+caching layers, a query planner, search, vector databases, embeddings,
+analytics, dashboards, reports, summaries, compression, scoring,
+subscriptions, streaming, pubsub, notifications, LLM projections or
+explanations, OpenAI/Claude/Gemini adapters, MCP, sandboxing,
+environment isolation, secret filtering, quotas, approval tokens, a
+conductor loop, multi-process access, a network service,
+belief_promoted events, convergence receipts, semantic validation,
+falsifiability evaluation, retries, timeouts, cleanup logic, artifact
+file storage, parallelism, memory across calls, prompt generation,
+conversation history, agent loops, worker orchestration, tool choice,
+persistent worker objects across process restarts, external
+verification signatures, receipt signing, git
+add/commit/push/pull/fetch/merge/rebase, branch creation, diff parsing,
+.gitignore interpretation, remote synchronization.
+
+## Running the tests
+
+```
+pip install -r requirements.txt
+python3 -m pytest leira/ -v
+```

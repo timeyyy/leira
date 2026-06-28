@@ -1,0 +1,132 @@
+Implement Leira v0.3: Worker Seam
+
+Mission:
+Extend the existing ledger, operation envelope, and run lifecycle with the smallest deterministic worker seam.
+
+This is not intelligence.
+This is not orchestration.
+This is only the attachment point where future intelligence may connect.
+
+Hard Constraints:
+- Python only.
+- SQLite only.
+- Single process only.
+- Blocking/synchronous only.
+- Library, not service.
+- No async.
+- No threads.
+- No daemon.
+- No network.
+- No LLM calls.
+- No adapters.
+- No routing.
+- No scheduler.
+- No retries.
+- No quota manager.
+- No memory.
+- No background tasks.
+
+Do not redesign existing ledger/envelope/lifecycle.
+
+Files:
+leira/
+  dispatcher/
+    worker.py
+    test_worker.py
+
+Worker API:
+Define a Protocol:
+
+from typing import Protocol
+
+class Worker(Protocol):
+    def wake(self, run_id: str, context: dict) -> WorkerResult: ...
+
+Define:
+
+@dataclass(frozen=True)
+class WorkerResult:
+    success: bool
+    artifact: dict | None = None
+    message: str | None = None
+    error_type: str | None = None
+
+Stub worker:
+Implement DeterministicStubWorker.
+
+It must always return:
+
+{
+  "type": "text",
+  "content": "stub artifact"
+}
+
+No randomness.
+No time dependency.
+No external calls.
+
+Context rules:
+- context must be JSON-safe.
+- Reject non-string dict keys.
+- Reject floats, NaN, Infinity.
+- Reject unserializable objects.
+- Context is data, not meaning.
+
+Artifact rules:
+- artifact must be a dict.
+- artifact must contain:
+  - type: str
+  - content: str
+- artifact must be JSON-safe.
+- artifact must not exceed MAX_ARTIFACT_BYTES.
+- Set MAX_ARTIFACT_BYTES to a small explicit constant, e.g. 64_000.
+
+Lifecycle integration:
+Implement a minimal helper such as:
+
+run_worker_once(run_id, worker, context) -> WorkerRunResult
+
+It should:
+1. append state_running
+2. call worker.wake(run_id, context)
+3. if worker succeeds, append artifact_written with artifact in payload_json
+4. append state_completed
+5. return typed result
+
+If artifact_written append fails, do not pretend completion happened.
+
+If worker fails, return typed failure and do not append state_completed.
+
+Do not solve hanging workers in v0.3.
+Document that worker invocation is blocking and a hanging worker hangs the process.
+
+Tests:
+1. DeterministicStubWorker returns stable output.
+2. WorkerResult is typed.
+3. context rejects non-JSON-safe data.
+4. artifact rejects missing type/content.
+5. artifact rejects oversized content.
+6. successful run records state_running, artifact_written, state_completed.
+7. worker failure does not append state_completed.
+8. validate_chain() still succeeds.
+9. repeated stub runs produce identical artifacts.
+
+Explicitly deferred:
+- real workers
+- shell adapter
+- OpenAI/Claude/Gemini adapters
+- MCP
+- retries
+- timeout handling
+- quotas
+- routing
+- parallelism
+- artifact files
+- projections
+
+Definition of done:
+The system can invoke one deterministic worker and record its output honestly.
+
+The worker is a test fixture, not a mind.
+
+The machine preserves what happened.

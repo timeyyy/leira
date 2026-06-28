@@ -1,0 +1,563 @@
+Implement Leira v2.4: Proposed Intent
+
+Mission
+
+Extend Leira from a machine that hosts minds into a machine where minds may suggest work without performing work.
+
+The goal is not agents.
+
+The goal is not autonomy.
+
+The goal is not planning.
+
+The goal is to prove that cognition can express proposed intent while remaining mechanically unable to act.
+
+The machine must be able to say:
+
+> A mind observed something.
+>
+> A mind proposed work.
+>
+> The proposal was recorded.
+>
+> No inbox entry was created automatically.
+>
+> No claim was acquired.
+>
+> No worker was dispatched.
+>
+> A human or caller may later decide what to do.
+
+Nothing more.
+
+Hard Constraints
+
+* Python only.
+* SQLite only.
+* Single process only.
+* Blocking only.
+* Library, not service.
+* No threads.
+* No async.
+* No daemon.
+* No retries.
+* No memory.
+* No planning.
+* No orchestration.
+* No routing.
+* No automatic execution.
+* No automatic promotion to inbox.
+* No recursive dispatch.
+* No inbox submission by minds.
+* No shell execution by minds.
+* No claim acquisition by minds.
+* No dispatcher access by minds.
+* No workspace mutation by minds.
+* No agent loops.
+
+Do not redesign:
+
+* inbox
+* dispatcher
+* registry
+* claims
+* worker protocol
+* Mind protocol
+* MindWorker
+* receipts
+* workspace
+* provenance
+* environment
+* archive
+* auditor
+
+Adapt existing structure minimally.
+
+Files
+
+```text
+leira/
+  proposals/
+    proposed_intent.py
+    test_proposed_intent.py
+```
+
+Mission
+
+Minds think.
+
+Minds suggest.
+
+Minds do not act.
+
+The proposal store records suggestions.
+
+It does not submit work.
+
+Nothing more.
+
+Proposed Intent
+
+Implement:
+
+```python
+@dataclass(frozen=True)
+class ProposedIntent:
+    proposal_id: str
+    source_intent_id: str
+    intent_type: str
+    payload: dict
+    created_by: str
+    created_at: str
+```
+
+Rules
+
+Proposals are evidence.
+
+Proposals are not inbox entries.
+
+Proposals are not claims.
+
+Proposals are not dispatch requests.
+
+Proposals do not imply approval.
+
+Proposals do not imply execution.
+
+Proposal API
+
+Implement:
+
+```python
+record_proposal(
+    source_intent_id: str,
+    mind_name: str,
+    intent_type: str,
+    payload: dict
+) -> RecordProposalResult
+```
+
+Implement:
+
+```python
+list_proposals(
+    source_intent_id: str
+) -> list[ProposedIntent]
+```
+
+Implement:
+
+```python
+get_proposal(
+    proposal_id: str
+) -> ProposedIntent | None
+```
+
+Typed Result
+
+```python
+@dataclass(frozen=True)
+class RecordProposalResult:
+    success: bool
+    proposal_id: str | None
+    error_type: str | None = None
+```
+
+Validation Rules
+
+Reject:
+
+* unknown source_intent_id
+* empty mind_name
+* empty intent_type
+* non-string intent_type
+* non-dict payload
+* non-JSON-serializable payload
+* duplicate proposal_id
+
+Suggested errors:
+
+```text
+UNKNOWN_SOURCE_INTENT
+INVALID_MIND
+INVALID_INTENT_TYPE
+INVALID_PAYLOAD
+NON_SERIALIZABLE_PAYLOAD
+DUPLICATE_PROPOSAL
+STORAGE_FAILURE
+```
+
+Proposal Events
+
+Successful recording appends:
+
+```text
+proposal_recorded
+```
+
+Rejected recording appends:
+
+```text
+proposal_rejected
+```
+
+Successful artifact:
+
+```python
+{
+    "type": "proposed_intent",
+    "content": {
+        "proposal_id": "...",
+        "source_intent_id": "...",
+        "intent_type": "...",
+        "payload": {...},
+        "created_by": "Claude:sonnet",
+        "error_type": None
+    }
+}
+```
+
+Rejected artifact:
+
+```python
+{
+    "type": "proposed_intent",
+    "content": {
+        "proposal_id": None,
+        "source_intent_id": "...",
+        "intent_type": "...",
+        "payload": {...},
+        "created_by": "Claude:sonnet",
+        "error_type": "INVALID_PAYLOAD"
+    }
+}
+```
+
+Kernel Rules
+
+The kernel does not:
+
+* execute proposals
+* submit proposals to inbox
+* acquire claims
+* dispatch workers
+* inspect proposed payload meaning
+* interpret intent types
+* judge proposal quality
+* approve proposals
+* reject proposals semantically
+
+It records:
+
+```python
+proposal_id
+source_intent_id
+intent_type
+payload
+created_by
+```
+
+Nothing more.
+
+Mind Boundary
+
+Do not change the Mind protocol.
+
+Minds still receive:
+
+```python
+MindRequest
+```
+
+and return:
+
+```python
+MindResponse
+```
+
+A mind does not receive:
+
+* inbox
+* dispatcher
+* claim store
+* shell adapter
+* workspace
+* registry
+* database connection
+
+If a caller wants to treat part of a MindResponse as a ProposedIntent, the caller must explicitly call:
+
+```python
+record_proposal(...)
+```
+
+The mind does not call it directly.
+
+Caller Responsibility
+
+If a caller wishes to execute proposed work:
+
+1. inspect proposal
+2. explicitly call submit_intent(...)
+3. proceed through normal claim and dispatch
+
+No shortcut path exists.
+
+No auto-promotion exists.
+
+No proposal-to-inbox bridge exists in v2.4.
+
+Proposal Store Isolation
+
+`record_proposal` must not import or depend on:
+
+* dispatcher
+* shell adapter
+* worker registry
+* MindRegistry
+* claim store
+
+It may depend on:
+
+* ledger append machinery
+* projection update machinery
+* validation helpers
+
+The proposal module records evidence and stops.
+
+Projection
+
+Create:
+
+```text
+proposal_projection
+```
+
+Fields:
+
+```python
+proposal_id
+source_intent_id
+created_by
+intent_type
+created_at
+last_event_id
+```
+
+Projection is derived.
+
+created_at comes from ledger timestamps.
+
+Never use:
+
+```python
+datetime.now()
+```
+
+during rebuild.
+
+Projection Rebuild
+
+Scan:
+
+```text
+proposal_recorded
+proposal_rejected
+```
+
+Rules:
+
+* proposal_recorded creates proposal row.
+* proposal_rejected does not create executable work.
+* rejected proposals may appear only as rejection history, not accepted proposal rows.
+
+Rebuild must be:
+
+* deterministic
+* idempotent
+* transactional
+
+Audit Extension
+
+Verify:
+
+* proposals match ledger
+* proposal ids are unique
+* proposal_projection matches ledger
+* created_at equals ledger event timestamp
+* rejected proposals are preserved as history
+* proposals are not inbox entries
+* proposals are not claims
+* proposals are not dispatch events
+* no proposal automatically became an inbox entry
+* no proposal was automatically executed
+* Mind protocol has no inbox/dispatcher access
+
+Audit remains read-only.
+
+Audit reports disagreement.
+
+It does not repair.
+
+Negative Execution Check
+
+Audit must be able to verify the suggestion boundary:
+
+For every:
+
+```text
+proposal_recorded
+```
+
+there must be no automatic corresponding:
+
+```text
+intent_submitted
+intent_claimed
+state_running
+artifact_written
+```
+
+unless such later events exist as separate, explicit, normal workflow events.
+
+No causal shortcut may be assumed.
+
+No hidden promotion may exist.
+
+Failure Model
+
+A rejected proposal is data.
+
+A proposal that is never acted on is normal.
+
+A proposal that later becomes an inbox intent must go through ordinary submit_intent.
+
+Proposal storage failure is kernel storage failure.
+
+Not mind failure.
+
+Stress Tests
+
+Generate:
+
+```text
+100 proposals
+```
+
+Verify:
+
+* rebuild succeeds
+* audit passes
+* validate_chain() succeeds
+* inbox entry count does not increase from proposals alone
+* no claims are created from proposals
+* no dispatch occurs from proposals
+
+Tests
+
+Required tests
+
+1. proposal recording succeeds.
+2. proposal rejection recorded.
+3. unknown source_intent_id rejected.
+4. invalid mind_name rejected.
+5. empty intent_type rejected.
+6. non-string intent_type rejected.
+7. non-dict payload rejected.
+8. non-serializable payload rejected.
+9. proposal ids unique.
+10. proposals retrievable by source_intent_id.
+11. proposals retrievable by proposal_id.
+12. proposal_recorded event recorded.
+13. proposal_rejected event recorded.
+14. projection rebuilt correctly.
+15. created_at derived from ledger timestamp.
+16. rebuild deterministic.
+17. rebuild idempotent.
+18. proposals are not inbox entries.
+19. proposals are not claims.
+20. proposals are not dispatched.
+21. record_proposal does not import dispatcher.
+22. record_proposal does not import claim store.
+23. record_proposal does not import shell adapter.
+24. Mind protocol unchanged.
+25. minds cannot receive dispatcher.
+26. minds cannot receive inbox.
+27. audit validates proposal projection.
+28. audit verifies no automatic execution.
+29. audit remains read-only.
+30. validate_chain() still succeeds.
+31. 100-proposal stress test passes.
+
+Explicitly Deferred
+
+* agents
+* autonomous loops
+* automatic execution
+* proposal approval
+* proposal promotion
+* proposal-to-inbox bridge
+* routing
+* planning
+* memory
+* tools
+* MCP
+* reflection
+* self-improvement
+* recursive execution
+* mind-submitted intents
+
+Definition of Done
+
+Leira can host minds that suggest work.
+
+Suggestions are evidence.
+
+Suggestions are not actions.
+
+The caller chooses.
+
+The inbox governs.
+
+The claim store locks.
+
+The dispatcher executes.
+
+The kernel remains boring.
+
+Meaning belongs to minds.
+
+Mechanics belong to the kernel.
+
+Remember:
+
+Workers think.
+
+Minds think.
+
+Minds suggest.
+
+Kernel gates.
+
+Ledger remembers.
+
+Projections serve.
+
+Auditors verify.
+
+Receipts preserve evidence.
+
+Archives preserve history.
+
+Intelligence lives at the edges.
+
+Truth lives in receipts.
+
+A proposal is not an intent.
+
+A suggestion is not an action.
+
+Build suggestion.
+
+Do not build the agent.

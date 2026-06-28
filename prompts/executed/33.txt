@@ -1,0 +1,352 @@
+# Leira v2.2 — Missing Evidence Projection
+
+## Mission
+
+Implement the deterministic **Missing Evidence Projection**.
+
+This is **not** a planner.
+
+This is **not** a dispatcher.
+
+This is **not** a recommendation engine.
+
+This is **not** a flow policy.
+
+It is a pure read model that derives the set of lifecycle evidence that has not yet been produced.
+
+Its purpose is to answer one deterministic question:
+
+> "Given the current Lifecycle Projection, which evidence objects are still missing?"
+
+Nothing more.
+
+---
+
+# Architectural Review
+
+Leira now has:
+
+* immutable evidence records
+* a Lifecycle Projection
+* a Flow Policy Projection
+
+The Lifecycle Projection describes the complete state.
+
+However, callers still have to inspect that projection to determine which evidence is absent.
+
+That should become an explicit deterministic projection.
+
+The Missing Evidence Projection does **not** decide what should happen next.
+
+It merely derives what evidence is currently absent.
+
+Future Flow Policies may evaluate this projection, but this projection itself remains entirely descriptive.
+
+---
+
+# Steward's Law
+
+Keep it boring.
+
+The projection may answer:
+
+> "What evidence is missing?"
+
+It must never answer:
+
+> "What should be created?"
+
+---
+
+# Files
+
+Create:
+
+```text
+leira/missing_evidence_projection/
+    __init__.py
+    missing_evidence.py
+    test_missing_evidence_projection.py
+```
+
+Modify nothing else unless strictly necessary.
+
+---
+
+# Public API
+
+Create immutable dataclasses.
+
+## MissingEvidenceProjection
+
+Fields:
+
+```text
+subject_id
+
+subject_kind
+
+missing_evidence
+
+completed_evidence
+
+missing_count
+
+completed_count
+```
+
+All immutable.
+
+No generated identifiers.
+
+No timestamps.
+
+No clocks.
+
+No UUIDs.
+
+No randomness.
+
+---
+
+## MissingEvidence
+
+Create immutable value object.
+
+Fields:
+
+```text
+label
+```
+
+The projection preserves lifecycle ordering exactly.
+
+---
+
+# Functions
+
+Implement:
+
+```text
+build_missing_evidence_projection(...)
+```
+
+Input:
+
+```text
+LifecycleProjection
+```
+
+Only.
+
+No repository scanning.
+
+No filesystem inspection.
+
+No ledger access.
+
+No evidence inspection.
+
+No reconstruction.
+
+Returns:
+
+```text
+MissingEvidenceProjection
+```
+
+---
+
+Implement:
+
+```text
+missing_evidence_projection_markdown(...)
+```
+
+Returns deterministic markdown.
+
+---
+
+Implement:
+
+```text
+write_missing_evidence_projection(...)
+```
+
+Optional derived scratch writer.
+
+Writes:
+
+```text
+.leira/missing_evidence/<subject_id>.missing.md
+```
+
+Derived output only.
+
+---
+
+# Markdown Format
+
+```text
+# Missing Evidence Projection
+
+## Subject
+
+Subject ID:
+...
+
+Subject Kind:
+...
+
+## Missing Evidence
+
+...
+
+## Completed Evidence
+
+...
+
+## Counts
+
+Missing:
+...
+
+Completed:
+...
+
+## Provenance Notice
+
+This projection derives missing lifecycle evidence from a supplied Lifecycle Projection.
+
+It performs no planning, recommendation, dispatch, execution, approval or workflow transitions.
+```
+
+Section order must never vary.
+
+---
+
+# Determinism Requirements
+
+Same Lifecycle Projection
+
+↓
+
+same Missing Evidence Projection
+
+↓
+
+same markdown
+
+↓
+
+same file bytes
+
+No sorting.
+
+No hidden state.
+
+No inference.
+
+No repository inspection.
+
+No filesystem inspection.
+
+No ledger queries.
+
+No randomness.
+
+No timestamps.
+
+---
+
+# Tests
+
+Create comprehensive pytest coverage.
+
+Verify:
+
+* immutable dataclasses
+* deterministic projection creation
+* deterministic markdown
+* deterministic file output
+* byte-identical repeated rendering
+* byte-identical repeated writes
+* lifecycle ordering preserved exactly
+* missing_count correct
+* completed_count correct
+* all evidence present
+* all evidence missing
+* mixed evidence
+* no repository scanning
+* no filesystem inspection
+* no ledger access
+* no project-state mutation
+* no planner
+* no dispatcher
+* no recommendation engine
+* no flow policy evaluation
+* no AI calls
+* no browser automation
+* no subprocess
+* no shell commands
+* no clocks
+* no timestamps
+* no UUIDs
+* no randomness
+
+---
+
+# Explicit Guardrails
+
+Do not implement:
+
+* planner
+* dispatcher
+* workflow engine
+* flow policy evaluation
+* recommendation engine
+* approval
+* rejection
+* execution
+* subprocess
+* shell commands
+* CLI
+* browser automation
+* AI adapters
+* repository scanning
+* filesystem inspection
+* ledger access
+* database
+* project-state mutation
+
+---
+
+# Design Constraint
+
+The Missing Evidence Projection operates **only** on a supplied LifecycleProjection.
+
+It must never inspect evidence directly.
+
+It must never reconstruct lifecycle state.
+
+It must never scan the repository.
+
+It must never load artifacts from disk.
+
+Everything required for derivation is supplied explicitly by the caller.
+
+---
+
+# Why This Slice Exists
+
+This is the second deterministic interpretation layer in Leira.
+
+Evidence describes reality.
+
+Lifecycle Projection summarizes reality.
+
+Missing Evidence Projection derives what evidence has not yet been produced.
+
+Future Flow Policy Projections may consume this projection to determine which lifecycle actions are currently permitted.
+
+The Missing Evidence Projection remains purely derived, deterministic, inspectable, and replayable.

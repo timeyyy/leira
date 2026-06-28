@@ -1,0 +1,178 @@
+# Leira v1.10 — Deterministic Prompt Drafter
+
+Implement a read-only deterministic Prompt Drafter.
+
+Purpose:
+
+```text
+project_state
+→ deterministic draft packet
+```
+
+No minds.
+No agents.
+No approval.
+No dispatch.
+No CLI.
+
+## Create
+
+```text
+leira/prompt_drafter/
+  __init__.py
+  drafter.py
+  test_prompt_drafter.py
+```
+
+## Core behavior
+
+The drafter reads v1.9 `project_state` and returns a deterministic markdown draft as data.
+
+It may optionally write the draft to:
+
+```text
+.leira/outbox/draft_<prompt_number>.md
+```
+
+The outbox is a derived scratch surface. Re-running with identical inputs must produce byte-identical output.
+
+## Selection rule
+
+Select the lowest-numbered prompt that is:
+
+```text
+not implemented
+not postponed
+not superseded
+not conflicting
+```
+
+If prompt 20 is postponed, do not draft prompt 20.
+
+If no eligible prompt exists, return deterministic refusal:
+
+```text
+status=no_eligible_prompt
+```
+
+## Disagreement distinction
+
+Use distinct names:
+
+```text
+audit_inconsistency
+```
+
+Blocks drafting.
+
+```text
+open_proposal_disagreements
+```
+
+Renders in the draft as human-visible context.
+
+Do not merge, resolve, summarize away, or adjudicate proposal disagreements.
+
+## Blocking interlocks
+
+Return deterministic refusal if:
+
+```text
+ledger_health = failed
+audit_inconsistency = true
+```
+
+Known pre-existing unrelated failing tests are warnings, not blockers.
+
+No partial draft.
+
+## No timestamp
+
+Do not include generation timestamps.
+
+No clock.
+
+No injected time.
+
+## Draft sections
+
+Include:
+
+1. Header
+2. Selected prompt identifier
+3. Raw prompt text
+4. Project state snapshot
+5. Source-labeled evidence
+6. Frozen invariants
+7. Authorized scope
+8. Postponed/superseded/conflicting prompt notes only when directly relevant
+9. Open proposal disagreements, if any
+10. Explicit do-not-implement section
+
+## Frozen invariants
+
+Use a static version-controlled source such as:
+
+```text
+.leira/invariants.md
+```
+
+If absent, use a minimal deterministic default in code and mark source as:
+
+```text
+default_static
+```
+
+## Authorized scope
+
+Use static deterministic mapping if available.
+
+If no mapping exists, include:
+
+```text
+authorized_scope=unknown
+```
+
+Do not guess.
+
+## Refusal output
+
+Refusals must be deterministic data with:
+
+```text
+status
+reason_code
+source_labels
+```
+
+Same input must produce byte-identical refusal output.
+
+## Tests
+
+Verify:
+
+* deterministic draft output
+* deterministic refusal output
+* no ledger mutation
+* repeated run with same input produces byte-identical draft
+* repeated run leaves ledger hash unchanged
+* audit inconsistency blocks
+* open proposal disagreements render
+* prompt 20 postponed means prompt 20 is not selected
+* selection rule is total and mechanical
+* source labels are preserved
+* no minds/adapters/proposal/approval/CLI added
+
+Hard constraints:
+
+* no LLMs
+* no agents
+* no adapters
+* no approval
+* no dispatch
+* no CLI
+* no mutation
+* no planning
+* no recommendations
+* no timestamps
+* no clocks

@@ -1,0 +1,405 @@
+Implement Leira v0.5: Git Adapter
+
+Mission
+
+Extend Leira from shell witness to repository witness.
+
+The goal is not project management.
+
+The goal is to prove Leira can inspect and record the state of a Git repository honestly.
+
+The machine must be able to say:
+
+> I looked at a repository.
+>
+> Here is its current commit.
+>
+> Here is its branch.
+>
+> Here is whether it was clean or dirty.
+>
+> Here is exactly what Git reported.
+
+Nothing more.
+
+Hard Constraints
+
+* Python only.
+* SQLite only.
+* Single process only.
+* Blocking only.
+* Library, not service.
+* No threads.
+* No async.
+* No daemon.
+* No LLM calls.
+* No routing.
+* No scheduler.
+* No retries.
+* No quotas.
+* No memory.
+* No background tasks.
+* No prompt generation.
+* No shell=True.
+* Do not mutate repositories.
+* Do not run git add.
+* Do not run git commit.
+* Do not run git push.
+* Do not run git pull.
+* Do not parse diffs.
+* Do not implement file filtering.
+* Do not inspect .gitignore.
+* Do not maintain repository state.
+
+Do not redesign the ledger, envelope, lifecycle, worker seam, or shell adapter.
+
+Git inspection is read-only.
+
+Leira is a witness.
+
+Not a project manager.
+
+Files
+
+```text
+leira/
+  dispatcher/
+    git.py
+    test_git.py
+```
+
+Adapt existing structure minimally.
+
+Reuse the shell adapter.
+
+Do not duplicate subprocess logic.
+
+Git Adapter API
+
+Implement:
+
+```python
+@dataclass(frozen=True)
+class GitStatusResult:
+    success: bool
+    repo_path: str
+    head_sha: str | None
+    branch: str | None
+    is_dirty: bool | None
+    status_porcelain: str
+    stderr: str
+    error_type: str | None = None
+```
+
+Implement:
+
+```python
+inspect_repo(
+    repo_path: str,
+    timeout_seconds: int = 30
+) -> GitStatusResult
+```
+
+Git Commands
+
+Use explicit argument lists:
+
+```python
+["git", "-C", repo_path, "rev-parse", "--show-toplevel"]
+["git", "-C", repo_path, "rev-parse", "HEAD"]
+["git", "-C", repo_path, "branch", "--show-current"]
+["git", "-C", repo_path, "status", "--porcelain"]
+```
+
+Reuse:
+
+```python
+run_command(...)
+```
+
+from the shell adapter.
+
+Never use shell=True.
+
+Rules
+
+Empty status_porcelain means:
+
+```python
+is_dirty = False
+```
+
+Non-empty status_porcelain means:
+
+```python
+is_dirty = True
+```
+
+Detached HEAD may produce an empty branch.
+
+This is not failure.
+
+Leira records what Git reports.
+
+It does not interpret branch state.
+
+Git failures are operational data.
+
+Not kernel failures.
+
+Typed Failures
+
+Repository not found:
+
+```python
+error_type="NOT_REPOSITORY"
+```
+
+Git executable missing:
+
+```python
+error_type="GIT_NOT_FOUND"
+```
+
+Timeout:
+
+```python
+error_type="TIMEOUT"
+```
+
+Unexpected exception:
+
+```python
+error_type="UNEXPECTED"
+```
+
+Operational failures should become typed results.
+
+Not exceptions.
+
+Artifact Schema
+
+Git artifacts must be:
+
+```python
+{
+    "type": "git_status",
+    "content": {
+        "repo_path": "...",
+        "head_sha": "...",
+        "branch": "...",
+        "is_dirty": False,
+        "status_porcelain": "",
+        "stderr": "",
+        "error_type": None
+    }
+}
+```
+
+Artifact Size
+
+Enforce:
+
+```python
+MAX_ARTIFACT_BYTES
+```
+
+before appending artifact_written.
+
+If status_porcelain or stderr exceed limits:
+
+truncate deterministically and add:
+
+```python
+"truncated": True
+```
+
+Lifecycle
+
+Implement:
+
+```python
+run_git_status_once(
+    run_id,
+    repo_path,
+    timeout_seconds=30
+)
+```
+
+Sequence
+
+1.
+
+```text
+append state_running
+```
+
+2.
+
+```text
+inspect repository
+```
+
+3.
+
+```text
+create git_status artifact
+```
+
+4.
+
+```text
+enforce MAX_ARTIFACT_BYTES
+```
+
+5.
+
+```text
+append artifact_written
+```
+
+6.
+
+```text
+append state_completed
+```
+
+If inspection fails:
+
+* still append artifact_written
+* still append state_completed
+* record stderr honestly
+* record error_type honestly
+
+If artifact append fails:
+
+* do not append state_completed
+* return typed failure
+
+Kernel Rules
+
+The kernel does not interpret Git.
+
+The kernel does not decide whether dirty is bad.
+
+The kernel does not parse diffs.
+
+The kernel does not understand .gitignore.
+
+The kernel only records:
+
+* repository path
+* head sha
+* branch
+* status_porcelain
+* dirty flag
+* stderr
+* error type
+
+Git decides what exists.
+
+Leira preserves what Git said.
+
+Repository Performance
+
+Large repositories may cause:
+
+```text
+git status --porcelain
+```
+
+to run slowly.
+
+Blocking behavior is acceptable.
+
+The kernel must honestly inherit repository performance characteristics.
+
+Do not optimize.
+
+Do not cache.
+
+Do not schedule.
+
+Truth outranks responsiveness.
+
+Tests
+
+Tests must create temporary repositories.
+
+Never test against the user's working directory.
+
+Use:
+
+```python
+tempfile.TemporaryDirectory()
+git init
+```
+
+Required tests
+
+1. clean repository records is_dirty=False.
+2. dirty repository records is_dirty=True.
+3. head_sha captured.
+4. branch captured.
+5. status_porcelain captured exactly.
+6. detached HEAD handled.
+7. non-repository returns NOT_REPOSITORY.
+8. missing git executable returns GIT_NOT_FOUND.
+9. timeout returns TIMEOUT.
+10. artifact_written recorded.
+11. state_completed recorded after inspection failure.
+12. state_completed not recorded when artifact append fails.
+13. validate_chain() still succeeds.
+14. shell adapter reused.
+15. shell=True never used.
+16. typed failures used instead of exceptions.
+17. oversized artifacts truncated deterministically.
+
+Explicitly Deferred
+
+* git add
+* git commit
+* git push
+* git pull
+* git fetch
+* git merge
+* git rebase
+* branch creation
+* diff parsing
+* .gitignore interpretation
+* semantic analysis
+* task management
+* issue tracking
+* remote synchronization
+* retries
+* caching
+* memory
+* OpenAI adapter
+* Claude adapter
+* Gemini adapter
+* MCP
+* agent loops
+
+Definition of Done
+
+Leira can inspect a repository and preserve what Git reported.
+
+A dirty repository is not a failed kernel.
+
+A detached HEAD is not a failed kernel.
+
+A non-repository is not a failed kernel.
+
+Git failures are artifacts.
+
+Not catastrophes.
+
+Remember:
+
+The shell introduced the operating system.
+
+Git introduces provenance.
+
+Before inviting another mind,
+
+the workshop should learn to remember itself.

@@ -1,0 +1,258 @@
+# Leira v3.0 — Engineering Kernel
+
+## Mission
+
+Implement the first deterministic Engineering Kernel.
+
+This is **not** a planner.
+
+This is **not** a dispatcher.
+
+This is **not** an agent.
+
+This is **not** autonomous.
+
+It is a deterministic coordinator that composes existing projection modules into a single executable pipeline.
+
+It owns no canonical state.
+
+It performs no judgement.
+
+It performs no mutation.
+
+---
+
+## Files
+
+Create:
+
+```text
+leira/engineering_kernel/
+    __init__.py
+    kernel.py
+    test_engineering_kernel.py
+```
+
+Modify nothing else unless strictly necessary.
+
+---
+
+## Public API
+
+Create immutable dataclass:
+
+```text
+EngineeringKernelResult
+```
+
+Fields:
+
+```text
+subject_id
+
+subject_kind
+
+lifecycle_projection
+
+missing_evidence_projection
+
+flow_policy_projection
+
+engineering_state_projection
+```
+
+No generated identifiers.
+
+No timestamps.
+
+No clocks.
+
+No UUIDs.
+
+No randomness.
+
+---
+
+## Functions
+
+Implement:
+
+```text
+run_engineering_kernel(...)
+```
+
+Inputs:
+
+- caller supplied evidence
+- caller supplied FlowPolicy
+
+Pipeline:
+
+1. Build Lifecycle Projection.
+2. Build Missing Evidence Projection.
+3. Evaluate Flow Policy Projection.
+4. Build Engineering State Projection.
+
+Return:
+
+```text
+EngineeringKernelResult
+```
+
+---
+
+Implement:
+
+```text
+engineering_kernel_markdown(...)
+```
+
+Returns deterministic markdown.
+
+---
+
+Implement:
+
+```text
+write_engineering_kernel(...)
+```
+
+Writes:
+
+```text
+.leira/engineering_kernel/<subject_id>.kernel.md
+```
+
+Derived output only.
+
+---
+
+## Markdown
+
+```text
+# Engineering Kernel
+
+## Subject
+
+...
+
+## Lifecycle
+
+...
+
+## Missing Evidence
+
+...
+
+## Flow Policy
+
+...
+
+## Engineering State
+
+...
+
+## Provenance Notice
+
+This result composes deterministic kernel stages.
+
+It performs no planning, approval, execution or dispatch.
+```
+
+Section order must never vary.
+
+---
+
+## Determinism Requirements
+
+Same inputs
+
+↓
+
+same kernel result
+
+↓
+
+same markdown
+
+↓
+
+same file bytes
+
+No sorting.
+
+No hidden state.
+
+No repository scanning.
+
+No filesystem inspection.
+
+No ledger access.
+
+No randomness.
+
+No timestamps.
+
+---
+
+## Tests
+
+Create comprehensive pytest coverage.
+
+Verify:
+
+- immutable dataclass
+- deterministic execution
+- deterministic markdown
+- deterministic file output
+- pipeline order fixed
+- each stage invoked exactly once
+- lifecycle projection preserved exactly
+- missing evidence projection preserved exactly
+- flow policy projection preserved exactly
+- engineering state projection preserved exactly
+- byte-identical repeated execution
+- no repository scanning
+- no filesystem inspection
+- no ledger access
+- no planner
+- no dispatcher
+- no execution
+- no AI calls
+- no browser automation
+- no subprocess
+- no shell commands
+- no clocks
+- no timestamps
+- no UUIDs
+- no randomness
+
+---
+
+## Explicit Guardrails
+
+Do not implement:
+
+- planner
+- dispatcher
+- workflow engine
+- execution
+- repository loading
+- policy loading
+- AI adapters
+- browser automation
+- CLI
+- database
+- project-state mutation
+
+---
+
+## Steward's Law
+
+Keep it boring.
+
+The Engineering Kernel coordinates deterministic components.
+
+It owns no engineering knowledge.
+
+All engineering behaviour remains inside the existing projection modules.

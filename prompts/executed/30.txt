@@ -1,0 +1,95 @@
+# Leira v1.19 — Verification Prompt Drafter
+
+## Mission
+
+Implement a deterministic Verification Prompt Drafter.
+
+Given a slice label, subject module, and expected guardrails, it renders a reviewable verification prompt.
+
+It does not run tests.
+
+It does not inspect files.
+
+It does not verify anything.
+
+It only drafts the prompt that a human or external worker can use to request verification.
+
+## Files
+
+Create:
+
+leira/verification_prompt/
+    __init__.py
+    prompt.py
+    test_verification_prompt.py
+
+## Public API
+
+Immutable dataclass:
+
+VerificationPrompt
+
+Fields:
+
+prompt_id
+slice_label
+subject_label
+subject_path
+expected_test_command
+required_checks
+guardrails
+output_sections
+source_label
+
+All fields caller supplied.
+
+All sequence fields preserve caller order exactly.
+
+## Functions
+
+create_verification_prompt(...)
+
+verification_prompt_markdown(...)
+
+write_verification_prompt(...)
+
+Writes:
+
+.leira/verification_prompts/<prompt_id>.verification_prompt.md
+
+## Guardrails
+
+No test execution.
+No file inspection.
+No subprocess.
+No shell commands.
+No git calls.
+No pytest calls.
+No verification logic.
+No approval/rejection.
+No dispatch.
+No planner.
+No AI calls.
+No ledger/database persistence.
+No project-state mutation.
+
+## Required Output Sections Default
+
+The caller may supply these explicitly:
+
+1. Executive summary
+2. Files changed
+3. Public API
+4. Test command and results
+5. Requirements matrix
+6. Guardrail audit
+7. Determinism audit
+8. Mutation audit
+9. Remaining technical debt
+10. Suggested next slice
+
+## Provenance Notice
+
+This prompt is a deterministic draft for requesting verification.
+
+It performs no verification, execution, approval, rejection or dispatch.

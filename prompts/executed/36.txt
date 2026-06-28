@@ -1,0 +1,258 @@
+# Leira v3.1 — Human Decision Draft Projection
+
+## Mission
+
+Implement the deterministic **Human Decision Draft Projection**.
+
+This is **not** a planner.
+
+This is **not** a dispatcher.
+
+This is **not** autonomous.
+
+This is **not** a decision engine.
+
+It is a deterministic read model that converts an Engineering Kernel Result into a reviewable Human Decision draft.
+
+It never creates a Human Decision Record.
+
+It never approves anything.
+
+It merely prepares a deterministic draft for human review.
+
+---
+
+## Files
+
+Create:
+
+```text
+leira/human_decision_draft/
+    __init__.py
+    draft.py
+    test_human_decision_draft.py
+```
+
+Modify nothing else unless strictly necessary.
+
+---
+
+## Public API
+
+Create immutable dataclasses.
+
+```text
+HumanDecisionDraft
+```
+
+Fields:
+
+```text
+subject_id
+
+subject_kind
+
+recommended_action
+
+matched_rule
+
+reason_codes
+
+draft_summary
+```
+
+No generated identifiers.
+
+No timestamps.
+
+No clocks.
+
+No UUIDs.
+
+No randomness.
+
+---
+
+## Functions
+
+Implement:
+
+```text
+build_human_decision_draft(...)
+```
+
+Input:
+
+```text
+EngineeringKernelResult
+```
+
+Only.
+
+Return:
+
+```text
+HumanDecisionDraft
+```
+
+---
+
+Implement:
+
+```text
+human_decision_draft_markdown(...)
+```
+
+Returns deterministic markdown.
+
+---
+
+Implement:
+
+```text
+write_human_decision_draft(...)
+```
+
+Writes:
+
+```text
+.leira/human_decision_drafts/<subject_id>.draft.md
+```
+
+Derived output only.
+
+---
+
+## Markdown
+
+```text
+# Human Decision Draft
+
+## Subject
+
+...
+
+## Recommended Action
+
+...
+
+## Matched Rule
+
+...
+
+## Reason Codes
+
+...
+
+## Draft Summary
+
+...
+
+## Provenance Notice
+
+This draft is a deterministic projection.
+
+It does not create a Human Decision.
+
+It performs no approval, planning, execution or dispatch.
+```
+
+Section order must never vary.
+
+---
+
+## Determinism Requirements
+
+Same EngineeringKernelResult
+
+↓
+
+same draft
+
+↓
+
+same markdown
+
+↓
+
+same file bytes
+
+No sorting.
+
+No hidden state.
+
+No inference beyond deterministic field extraction.
+
+No repository scanning.
+
+No filesystem inspection.
+
+No ledger access.
+
+No randomness.
+
+No timestamps.
+
+---
+
+## Tests
+
+Create comprehensive pytest coverage.
+
+Verify:
+
+- immutable dataclass
+- deterministic draft creation
+- deterministic markdown
+- deterministic file output
+- byte-identical repeated rendering
+- byte-identical repeated writes
+- recommended_action copied exactly
+- matched_rule copied exactly
+- reason_codes preserved exactly
+- draft_summary deterministic
+- no repository scanning
+- no filesystem inspection
+- no ledger access
+- no project-state mutation
+- no planner
+- no dispatcher
+- no execution
+- no workflow engine
+- no AI calls
+- no browser automation
+- no subprocess
+- no shell commands
+- no clocks
+- no timestamps
+- no UUIDs
+- no randomness
+
+---
+
+## Explicit Guardrails
+
+Do not implement:
+
+- Human Decision creation
+- planner
+- dispatcher
+- workflow engine
+- execution
+- repository loading
+- policy loading
+- AI adapters
+- browser automation
+- CLI
+- database
+- project-state mutation
+
+---
+
+## Steward's Law
+
+Keep it boring.
+
+The draft is derived.
+
+Only a human may convert it into a Human Decision Record.

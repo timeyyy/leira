@@ -1,0 +1,314 @@
+# Leira v1.14 — Prompt Revision Record
+
+## Mission
+
+Implement the deterministic **Prompt Revision Record** slice.
+
+This slice preserves the evolution of a prompt after review.
+
+It does **not** perform the revision.
+
+It does **not** approve the revision.
+
+It does **not** determine whether the revision is better.
+
+It merely records:
+
+* which prompt was revised,
+* which review records informed the revision,
+* and the resulting prompt text.
+
+The lifecycle becomes:
+
+```
+Project State
+↓
+
+Prompt Draft
+↓
+
+Knowledge Gap
+↓
+
+Review Question
+↓
+
+Review Record
+↓
+
+Prompt Revision Record
+```
+
+The Prompt Revision Record is immutable evidence.
+
+It represents:
+
+> "Given these review records, this revised prompt was produced."
+
+Nothing more.
+
+---
+
+# Architectural Review
+
+Leira now possesses review evidence.
+
+The kernel's next responsibility is preserving how that evidence changed the prompt.
+
+The Prompt Revision Record does **not** replace the original prompt.
+
+History is append-only.
+
+Prompt evolution must always remain inspectable.
+
+Future humans should be able to answer:
+
+* What changed?
+* Why?
+* Which review records motivated the change?
+
+without reconstructing conversation history.
+
+---
+
+# Files
+
+Create:
+
+```
+leira/prompt_revision/
+    __init__.py
+    revision.py
+    test_prompt_revision.py
+```
+
+Modify nothing else unless strictly necessary.
+
+---
+
+# Public API
+
+Create immutable dataclasses.
+
+## PromptRevision
+
+Fields:
+
+```
+revision_id
+
+parent_draft_id
+
+review_record_ids
+
+reason_codes
+
+source_label
+
+revised_prompt
+
+revision_summary
+```
+
+All fields are caller supplied.
+
+No generated identifiers.
+
+No timestamps.
+
+No clocks.
+
+No UUIDs.
+
+No randomness.
+
+review_record_ids must preserve caller ordering exactly.
+
+---
+
+# Functions
+
+Implement:
+
+```
+create_prompt_revision(...)
+```
+
+Returns immutable PromptRevision.
+
+---
+
+Implement:
+
+```
+prompt_revision_markdown(...)
+```
+
+Returns deterministic markdown.
+
+---
+
+Implement:
+
+```
+write_prompt_revision(...)
+```
+
+Optional derived scratch writer.
+
+Writes:
+
+```
+.leira/prompt_revisions/<revision_id>.revision.md
+```
+
+Derived output only.
+
+---
+
+# Markdown Format
+
+Render exactly:
+
+```
+# Prompt Revision Record
+
+## Revision ID
+
+...
+
+## Parent Draft
+
+...
+
+## Review Records
+
+...
+
+## Source
+
+...
+
+## Reason Codes
+
+...
+
+## Revision Summary
+
+...
+
+## Revised Prompt
+
+...
+
+## Provenance Notice
+
+This record preserves a revised prompt as evidence.
+It performs no approval, reconciliation, dispatch, planning or execution.
+```
+
+Section order must never vary.
+
+---
+
+# Determinism Requirements
+
+Same inputs
+
+↓
+
+same object
+
+↓
+
+same markdown
+
+↓
+
+same file bytes
+
+No sorting.
+
+No inference.
+
+No automatic diff generation.
+
+No automatic summaries.
+
+No prompt rewriting.
+
+No semantic analysis.
+
+Everything supplied by the caller is preserved exactly.
+
+---
+
+# Tests
+
+Create comprehensive pytest coverage.
+
+Verify:
+
+* immutable dataclass
+* deterministic object creation
+* deterministic markdown
+* deterministic file output
+* repeated writes produce identical bytes
+* review record ordering preserved exactly
+* reason code ordering preserved exactly
+* revised prompt preserved exactly
+* revision summary preserved exactly
+* no clocks
+* no timestamps
+* no UUIDs
+* no randomness
+* no generated identifiers
+* no ledger mutation
+* no dispatcher imports
+* no approval logic
+* no rejection logic
+* no planning
+* no AI calls
+* no semantic analysis
+* no prompt generation
+
+---
+
+# Explicit Guardrails
+
+Do not implement:
+
+* prompt generation
+* prompt rewriting
+* automatic revision
+* semantic diffing
+* approval
+* rejection
+* voting
+* reconciliation
+* planner
+* dispatcher
+* CLI
+* AI adapters
+* browser automation
+* ledger persistence
+* database
+* orchestration
+
+---
+
+# Steward's Law
+
+Keep it boring.
+
+This slice exists solely to preserve prompt evolution as immutable evidence.
+
+The kernel should know:
+
+"What changed."
+
+It should remain completely ignorant of:
+
+"Whether the change was good."
+
+That judgement belongs to humans.

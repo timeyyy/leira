@@ -1,0 +1,604 @@
+Implement Leira v1.4: Filesystem Workspace
+
+Mission
+
+Extend Leira from a machine that records artifacts into a machine that stores evidence.
+
+The goal is not synchronization.
+
+The goal is not cloud storage.
+
+The goal is to prove that artifacts may exist outside the ledger while remaining mechanically verifiable.
+
+The machine must be able to say:
+
+> A worker produced bytes.
+>
+> Those bytes were written to a file.
+>
+> Here is where they live.
+>
+> Here is their hash.
+>
+> Here is their size.
+>
+> Here is the receipt that references them.
+
+Nothing more.
+
+Hard Constraints
+
+* Python only.
+* SQLite only.
+* Local filesystem only.
+* Single process only.
+* Blocking only.
+* Library, not service.
+* No threads.
+* No async.
+* No daemon.
+* No synchronization.
+* No remote storage.
+* No retries.
+* No scheduler.
+* No background tasks.
+* No file watching.
+* No automatic cleanup.
+* No mutation.
+* No deletion.
+* No renaming.
+* No LLM calls.
+* No agent loops.
+
+Do not redesign:
+
+* ledger
+* lifecycle
+* inbox
+* dispatcher
+* registry
+* claim store
+* projection engine
+* auditor
+* receipts
+
+Adapt existing structure minimally.
+
+Files
+
+```text
+leira/
+  workspace/
+    workspace.py
+    hashing.py
+    paths.py
+    test_workspace.py
+```
+
+Mission
+
+Artifacts become files.
+
+Receipts become references.
+
+The ledger remembers.
+
+The filesystem stores bytes.
+
+Nothing more.
+
+Workspace Structure
+
+Create:
+
+```text
+workspace/
+  intents/
+    <intent_id>/
+      artifacts/
+```
+
+Example:
+
+```text
+workspace/
+  intents/
+    abc123/
+      artifacts/
+        output.txt
+        report.json
+```
+
+Artifact Descriptor
+
+Implement:
+
+```python
+@dataclass(frozen=True)
+class ArtifactDescriptor:
+    artifact_id: str
+    intent_id: str
+    relative_path: str
+    sha256: str
+    size_bytes: int
+    created_at: str
+```
+
+Rules
+
+Artifacts are immutable.
+
+Artifact bytes are external.
+
+Metadata lives in the ledger.
+
+The filesystem is evidence storage.
+
+The ledger remains truth.
+
+Hashing
+
+Use:
+
+```python
+sha256(content)
+```
+
+Store:
+
+```python
+sha256
+size_bytes
+```
+
+Rules
+
+Hash is computed from bytes.
+
+Never trust filesystem timestamps.
+
+Never trust filenames.
+
+Hash is evidence.
+
+Path Generation
+
+Implement:
+
+```python
+_get_artifact_path(
+    intent_id: str,
+    relative_path: str
+) -> Path
+```
+
+Use:
+
+```python
+workspace/
+    intents/
+        <intent_id>/
+            artifacts/
+```
+
+Create parent directories with:
+
+```python
+mkdir(parents=True, exist_ok=True)
+```
+
+Filesystem Safety
+
+Treat:
+
+```python
+relative_path
+```
+
+as untrusted input.
+
+Reject:
+
+```text
+..
+absolute paths
+empty paths
+```
+
+Normalize paths.
+
+Require paths to remain inside:
+
+```text
+workspace/intents/<intent_id>/artifacts
+```
+
+Suggested errors:
+
+```python
+INVALID_PATH
+PATH_TRAVERSAL
+```
+
+Allowed characters may be restricted to boring filenames.
+
+The workspace is an evidence locker.
+
+Not a shell.
+
+Artifact API
+
+Implement:
+
+```python
+write_artifact(
+    intent_id: str,
+    relative_path: str,
+    content: bytes
+) -> ArtifactDescriptor
+```
+
+Implement:
+
+```python
+read_artifact(
+    intent_id: str,
+    relative_path: str
+) -> bytes
+```
+
+Implement:
+
+```python
+get_artifact(
+    artifact_id: str
+) -> ArtifactDescriptor | None
+```
+
+Filesystem Writes
+
+Use exclusive binary mode:
+
+```python
+open(path, "xb")
+```
+
+Rules
+
+No overwrite.
+
+No append mode.
+
+No mutation.
+
+No delete API.
+
+No rename API.
+
+Artifacts are write-once.
+
+If file already exists:
+
+append:
+
+```text
+artifact_write_rejected
+```
+
+Return:
+
+```python
+ALREADY_EXISTS
+```
+
+Artifact Event
+
+Successful write appends:
+
+```text
+artifact_file_written
+```
+
+Artifact schema:
+
+```python
+{
+    "type": "artifact_file",
+    "content": {
+        "artifact_id": "...",
+        "intent_id": "...",
+        "relative_path": "...",
+        "sha256": "...",
+        "size_bytes": 1234
+    }
+}
+```
+
+Rejected writes append:
+
+```text
+artifact_write_rejected
+```
+
+with:
+
+```python
+error_type
+```
+
+Receipt Integration
+
+Receipt bundles should contain:
+
+```python
+ArtifactDescriptor
+```
+
+references.
+
+Do not embed file bytes.
+
+Receipts point to evidence.
+
+They do not contain evidence.
+
+Projection
+
+Create:
+
+```text
+artifact_projection
+```
+
+Fields:
+
+```python
+artifact_id
+intent_id
+relative_path
+sha256
+size_bytes
+created_at
+last_event_id
+```
+
+Projection is derived.
+
+created_at comes from ledger timestamps.
+
+Never use:
+
+```python
+datetime.now()
+```
+
+during rebuild.
+
+Projection Rebuild
+
+Extend rebuild logic.
+
+Scan:
+
+```text
+artifact_file_written
+```
+
+events.
+
+Reconstruct projection.
+
+Rebuild must be:
+
+* deterministic
+* idempotent
+* transactional
+
+Audit Extension
+
+Audit now performs filesystem I/O.
+
+This is acceptable.
+
+Truth outranks speed.
+
+Verify:
+
+* file exists
+* file size matches size_bytes
+* file hash matches sha256
+* artifact projection matches ledger
+
+Distinguish failures:
+
+Missing file:
+
+```text
+MISSING_ARTIFACT_FILE
+```
+
+File exists but size differs:
+
+```text
+SIZE_MISMATCH
+```
+
+File exists and size matches but hash differs:
+
+```text
+HASH_MISMATCH
+```
+
+Audit remains read-only.
+
+Audit reports.
+
+It does not repair.
+
+Failure Model
+
+Missing files are recoverable by humans.
+
+File corruption is detectable.
+
+Ledger corruption is not.
+
+Do not optimize audit.
+
+Slow verification is honest verification.
+
+Kernel Rules
+
+The workspace does not:
+
+* synchronize
+* upload
+* delete
+* compress
+* version
+* rename
+* mutate files
+
+It writes files once.
+
+It records evidence.
+
+Stress Tests
+
+Write:
+
+```text
+100 artifacts
+```
+
+Verify:
+
+* hashes correct
+* rebuild succeeds
+* audit passes
+
+Modify one file without changing size.
+
+Verify:
+
+```text
+HASH_MISMATCH
+```
+
+Modify one file and change size.
+
+Verify:
+
+```text
+SIZE_MISMATCH
+```
+
+Delete one file.
+
+Verify:
+
+```text
+MISSING_ARTIFACT_FILE
+```
+
+Tests
+
+Required tests
+
+1. artifact write succeeds.
+2. artifact read succeeds.
+3. sha256 computed correctly.
+4. size_bytes correct.
+5. duplicate write rejected.
+6. artifact_file_written recorded.
+7. artifact_write_rejected recorded.
+8. projection rebuilt correctly.
+9. created_at derived from ledger timestamps.
+10. receipt bundle references descriptors.
+11. receipt bundle does not embed bytes.
+12. missing file detected by audit.
+13. size mismatch detected by audit.
+14. hash mismatch detected by audit.
+15. hash mismatch with identical size detected.
+16. path traversal rejected.
+17. absolute paths rejected.
+18. empty paths rejected.
+19. exclusive write mode prevents overwrite.
+20. audit remains read-only.
+21. rebuild deterministic.
+22. rebuild idempotent.
+23. projection loss recoverable.
+24. validate_chain() still succeeds.
+25. 100-artifact stress test passes.
+
+Explicitly Deferred
+
+* deletion
+* mutation
+* append mode
+* renaming
+* synchronization
+* git integration
+* S3
+* cloud storage
+* deduplication
+* compression
+* content-addressable storage
+* encryption
+* OpenAI
+* Claude
+* Gemini
+* MCP
+* agent loops
+
+Definition of Done
+
+Leira can store artifacts as durable files.
+
+The ledger remembers.
+
+The filesystem stores bytes.
+
+Receipts reference evidence.
+
+Hashes verify evidence.
+
+Files may be missing.
+
+Files may be corrupted.
+
+The machine can detect this.
+
+Nothing is hidden.
+
+Remember:
+
+Workers think.
+
+Kernel gates.
+
+Ledger remembers.
+
+Projections serve.
+
+Auditors verify.
+
+Intent enters.
+
+Dispatch happens.
+
+Workers are named.
+
+Claims establish ownership.
+
+Receipts preserve evidence.
+
+Files preserve bytes.
+
+The ledger is the court.
+
+The workspace is the evidence locker.
+
+Build the workspace.
+
+Do not build the cloud.

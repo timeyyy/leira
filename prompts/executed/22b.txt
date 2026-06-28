@@ -1,0 +1,159 @@
+# Leira v1.11a — Review Policy
+
+Implement a deterministic review policy module.
+
+Purpose:
+
+Decide whether a prompt or slice should require external feedback before implementation.
+
+This module does not call reviewers, analyze text semantically, approve work, revise prompts, or dispatch anything.
+
+It only classifies review need from explicit metadata.
+
+## Create
+
+```text
+leira/review_policy/
+  __init__.py
+  policy.py
+  test_review_policy.py
+```
+
+## Core idea
+
+Not every prompt needs multi-seat feedback.
+
+Feedback is valuable when architectural risk is high.
+
+Feedback is wasteful when the slice is mechanical and already constrained.
+
+## Data model
+
+Create immutable value objects:
+
+```text
+ReviewPolicyInput
+- slice_id
+- introduces_new_concept: bool
+- changes_invariant: bool
+- changes_authority_boundary: bool
+- irreversible_or_hard_to_undo: bool
+- ordering_uncertain: bool
+- mechanical_implementation: bool
+- already_agreed_concept: bool
+```
+
+```text
+ReviewPolicyDecision
+- review_required: bool
+- risk_level: low | medium | high
+- recommended_reviewers: list[str]
+- reason_codes: list[str]
+```
+
+## Deterministic rules
+
+Review is required if any of these are true:
+
+```text
+introduces_new_concept
+changes_invariant
+changes_authority_boundary
+irreversible_or_hard_to_undo
+ordering_uncertain
+```
+
+Review is not required if all of these are true:
+
+```text
+mechanical_implementation
+already_agreed_concept
+not introduces_new_concept
+not changes_invariant
+not changes_authority_boundary
+not irreversible_or_hard_to_undo
+not ordering_uncertain
+```
+
+Risk levels:
+
+```text
+low:
+  mechanical implementation only
+
+medium:
+  introduces new data artifact
+  or ordering uncertainty
+
+high:
+  changes invariant
+  changes authority boundary
+  irreversible/hard to undo
+```
+
+Recommended reviewers:
+
+```text
+low:
+  []
+
+medium:
+  ["Aura"]
+
+high:
+  ["Aura", "Aether", "Claude"]
+```
+
+No voting.
+
+No consensus.
+
+No automatic approval.
+
+This policy only recommends whether to ask for feedback.
+
+Tim remains final cut authority.
+
+## Required reason codes
+
+Use deterministic reason codes such as:
+
+```text
+mechanical_slice
+already_agreed
+new_concept
+invariant_change
+authority_boundary_change
+hard_to_undo
+ordering_uncertain
+```
+
+No prose-only decisions.
+
+## Tests
+
+Verify:
+
+* low-risk mechanical slice does not require review
+* new concept requires review
+* invariant change requires review
+* authority boundary change requires review
+* hard-to-undo change requires review
+* ordering uncertainty requires review
+* high-risk slices recommend Aura, Aether, and Claude
+* medium-risk slices recommend Aura
+* decisions are deterministic
+* no reviewer calls are made
+* no approval/dispatch/proposal/mind code is added
+
+## Definition of done
+
+A caller can ask:
+
+```text
+does this slice need feedback before implementation?
+```
+
+and receive a deterministic answer.
+
+Nothing else.

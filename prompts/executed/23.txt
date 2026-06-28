@@ -1,0 +1,550 @@
+Implement Leira v2.3: Claude Mind
+
+Mission
+
+Extend Leira from a machine that hosts one external intelligence into a machine that hosts multiple external intelligences without changing the kernel.
+
+The goal is not multi-agent systems.
+
+The goal is not consensus.
+
+The goal is not orchestration.
+
+The goal is to prove that ClaudeMind is merely another guest conforming to the existing Mind protocol.
+
+The machine must be able to say:
+
+> OpenAIMind was registered.
+>
+> ClaudeMind was registered.
+>
+> EchoMind was registered.
+>
+> The caller chose ClaudeMind.
+>
+> The registry resolved ClaudeMind.
+>
+> MindWorker wrapped ClaudeMind.
+>
+> The dispatcher executed a Worker.
+>
+> The kernel did not know which mind was used.
+
+Nothing more.
+
+Hard Constraints
+
+* Python only.
+* SQLite only.
+* Blocking only.
+* Single process only.
+* Library, not service.
+* No threads.
+* No async.
+* No daemon.
+* No retries.
+* No streaming.
+* No memory.
+* No tools.
+* No MCP.
+* No planning.
+* No reflection.
+* No recursive calls.
+* No agent loops.
+* No prompt generation.
+* No automatic context injection.
+* No shell execution.
+* No dispatch access.
+* No inbox access.
+* No kernel modifications.
+* No dispatcher modifications.
+* No worker protocol modifications.
+* No Mind protocol modifications.
+* No receipt schema modifications.
+* No intent envelope modifications.
+* No provider-specific artifact schema.
+* No special Claude lifecycle.
+* No special Claude projection.
+
+Do not redesign:
+
+* Mind
+* MindWorker
+* MindRegistry
+* worker protocol
+* dispatcher
+* claims
+* receipts
+* workspace
+* provenance
+* environment
+* archive
+* auditor
+
+Expected Diff Boundary
+
+The ideal implementation should only add or minimally touch:
+
+```text
+leira/
+  minds/
+    claude_mind.py
+    test_claude_mind.py
+```
+
+If adding ClaudeMind requires modifying:
+
+* kernel
+* dispatcher
+* ledger schema
+* worker protocol
+* Mind protocol
+* receipt bundle schema
+* intent envelope schema
+* claims
+
+the implementation is wrong.
+
+Mission
+
+Claude is a guest.
+
+Claude is not special.
+
+OpenAI is not special.
+
+EchoMind is not special.
+
+The kernel remains ignorant.
+
+Meaning belongs to minds.
+
+Mechanics belong to the kernel.
+
+Nothing more.
+
+Implementation
+
+Implement:
+
+```python
+class ClaudeMind(Mind):
+```
+
+Constructor:
+
+```python
+ClaudeMind(
+    model: str,
+    api_key: str,
+    timeout_seconds: int = 60
+)
+```
+
+Suggested name:
+
+```python
+Claude:<model>
+```
+
+Invoke:
+
+```python
+invoke(
+    request: MindRequest
+) -> MindResponse
+```
+
+Rules
+
+One request.
+
+One response.
+
+No streaming.
+
+No conversation history.
+
+No hidden context.
+
+No retries.
+
+No prompt templates.
+
+No automatic system prompts.
+
+If the Claude API requires message formatting, wrap only the provided request text.
+
+Adapter Boundary
+
+ClaudeMind owns:
+
+* client initialization
+* HTTP requests
+* timeout handling
+* API-specific failure mapping
+* response parsing
+* empty response handling
+* secret scrubbing from error messages
+
+The kernel owns:
+
+* recording
+* receipts
+* projections
+* audit mechanics
+
+The kernel must not import Anthropic.
+
+The dispatcher must not import Anthropic.
+
+The worker protocol must not import Anthropic.
+
+The Mind protocol must not import Anthropic.
+
+Failure Handling
+
+All operational failures return:
+
+```python
+MindResponse(
+    success=False,
+    text="",
+    error_type="...",
+    error_message="..."
+)
+```
+
+Never raise operational exceptions from the adapter.
+
+Suggested error types:
+
+```text
+AUTH_FAILURE
+RATE_LIMIT
+TIMEOUT
+NETWORK_FAILURE
+POLICY_VIOLATION
+EMPTY_RESPONSE
+UNEXPECTED_RESPONSE
+UNEXPECTED
+```
+
+Map Anthropic/provider-specific exceptions inside the adapter.
+
+Examples:
+
+```text
+anthropic.AuthenticationError -> AUTH_FAILURE
+anthropic.RateLimitError -> RATE_LIMIT
+anthropic.APITimeoutError -> TIMEOUT
+anthropic.APIConnectionError -> NETWORK_FAILURE
+safety/moderation/refusal/policy errors -> POLICY_VIOLATION
+malformed API responses -> UNEXPECTED_RESPONSE
+empty model output -> EMPTY_RESPONSE
+unknown exceptions -> UNEXPECTED
+```
+
+Provider-specific errors must never leak into kernel logic.
+
+Secret Hygiene
+
+Never record:
+
+* api_key
+* Authorization headers
+* x-api-key headers
+* raw client config containing secrets
+* environment variables containing secrets
+
+Allowed to record:
+
+* mind_name
+* model
+* request text
+* response text
+* error_type
+* scrubbed error_message
+
+Before returning error_message, scrub obvious secret-bearing substrings.
+
+Do not expose the API key through:
+
+```python
+__repr__
+__str__
+dataclass fields
+public attributes
+serialized state
+```
+
+Store secrets in private attributes only, and do not include them in outputs.
+
+Artifact Path
+
+Claude responses appear through ordinary:
+
+```text
+worker_result
+```
+
+artifacts via MindWorker.
+
+No Claude artifact type.
+
+No Claude lifecycle.
+
+No Claude projection.
+
+No Claude receipt field.
+
+Example worker_result artifact should match OpenAIMind structure:
+
+```python
+{
+    "type": "worker_result",
+    "content": {
+        "intent_id": "...",
+        "worker_name": "Claude:<model>",
+        "inputs": {
+            "text": "hello"
+        },
+        "outputs": {
+            "mind_name": "Claude:<model>",
+            "model": "<model>",
+            "request": "hello",
+            "response": "hello"
+        },
+        "worker_success": True,
+        "error_type": None,
+        "error_message": ""
+    }
+}
+```
+
+Provider-Agnostic Artifact Invariant
+
+OpenAIMind, ClaudeMind, EchoMind, and FakeMind must all flow through the same:
+
+```text
+Mind -> MindWorker -> WorkerResult -> worker_result artifact
+```
+
+path.
+
+No provider-specific schema.
+
+No provider-specific kernel logic.
+
+No provider-specific receipt logic.
+
+Kernel Rules
+
+The kernel does not know about:
+
+* Claude
+* Anthropic
+* OpenAI
+* providers
+* models
+* tokens
+* prompts
+* HTTP
+* API errors
+* rate limits
+* moderation
+* policies
+
+It records:
+
+```python
+request
+response
+mind_name
+model
+error_type
+```
+
+Nothing more.
+
+Mind Registry Integration
+
+Register:
+
+```python
+OpenAIMind(...)
+ClaudeMind(...)
+EchoMind()
+```
+
+The registry stores references only.
+
+The caller chooses.
+
+The registry resolves.
+
+MindWorker wraps.
+
+The dispatcher executes a Worker.
+
+No routing.
+
+No ranking.
+
+No comparison.
+
+No consensus.
+
+No council.
+
+Cross-Mind Invariance
+
+The following must require zero kernel changes:
+
+```python
+EchoMind
+OpenAIMind
+ClaudeMind
+FakeMind
+```
+
+If one provider requires changes to kernel mechanics, the seam has failed.
+
+Audit Extension
+
+Verify:
+
+* Claude responses are preserved
+* Claude failures are preserved
+* secrets are absent
+* worker_result artifacts are provider-agnostic
+* Claude artifact structure matches OpenAI artifact structure
+* no special lifecycle exists
+* no special projection exists
+* no kernel modifications are required
+* no dispatcher modifications are required
+* no receipt schema modifications are required
+
+Audit remains read-only.
+
+Testing Strategy
+
+Unit tests must not call the real Claude API.
+
+Use a fake client or injected transport.
+
+Test adapter behavior mechanically.
+
+Optional live API tests may be separate and skipped by default.
+
+Stress Tests
+
+Register:
+
+```text
+EchoMind
+OpenAIMind
+ClaudeMind
+```
+
+Dispatch fake requests through each.
+
+Verify:
+
+* same MindWorker path
+* same worker_result artifact shape
+* rebuild succeeds
+* audit passes
+* validate_chain() succeeds
+* no secrets recorded
+
+Tests
+
+Required tests
+
+1. successful response captured.
+2. network failure captured as NETWORK_FAILURE.
+3. auth failure captured as AUTH_FAILURE.
+4. timeout captured as TIMEOUT.
+5. rate limit captured as RATE_LIMIT.
+6. policy failure captured as POLICY_VIOLATION.
+7. malformed response captured as UNEXPECTED_RESPONSE.
+8. empty response captured as EMPTY_RESPONSE.
+9. no operational exceptions escape adapter.
+10. response recorded as ordinary worker_result.
+11. same artifact structure as OpenAIMind.
+12. no provider-specific artifact schema exists.
+13. no special Claude lifecycle exists.
+14. no special Claude projection exists.
+15. API keys never recorded in ledger.
+16. API keys never recorded in receipts.
+17. API keys never recorded in environment snapshots.
+18. error messages are scrubbed of secrets.
+19. secret not exposed via repr or str.
+20. registry resolves ClaudeMind.
+21. MindWorker wraps ClaudeMind.
+22. dispatcher remains unaware of Claude.
+23. kernel remains unaware of Claude.
+24. no kernel modifications required.
+25. no dispatcher modifications required.
+26. no protocol modifications required.
+27. no receipt schema modifications required.
+28. rebuild deterministic.
+29. rebuild idempotent.
+30. audit validates responses.
+31. audit validates secret absence.
+32. validate_chain() still succeeds.
+33. multi-mind fake-client stress test passes.
+34. live Claude API tests are optional and skipped by default.
+
+Explicitly Deferred
+
+* MCP
+* tools
+* streaming
+* retries
+* memory
+* routing
+* consensus
+* debates
+* ensembles
+* prompt templates
+* system prompts
+* reflection
+* agent loops
+* multi-agent systems
+* automatic mind selection
+* provider comparison
+* GeminiMind
+
+Definition of Done
+
+Leira hosts multiple external minds.
+
+Claude is a guest.
+
+OpenAI is a guest.
+
+EchoMind is a guest.
+
+The registry resolves names.
+
+The caller chooses.
+
+MindWorker adapts.
+
+The dispatcher remains boring.
+
+The kernel remains ignorant.
+
+Provider details stay inside adapters.
+
+Provider outputs become ordinary worker results.
+
+Intelligence lives at the edges.
+
+Truth lives in receipts.
+
+Build another guest.
+
+Do not build the council.

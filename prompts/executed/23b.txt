@@ -1,0 +1,190 @@
+# Leira v1.12 — Knowledge Gap / Review Question
+
+Implement a deterministic knowledge-gap layer.
+
+Purpose:
+
+```text
+draft packet
+→ explicit uncertainty
+→ targeted review question
+→ feedback record
+```
+
+This slice does not revise prompts, approve, reject, dispatch, call minds, or analyze feedback semantically.
+
+It only represents the question that should be asked when review is needed.
+
+## Create
+
+```text
+leira/knowledge_gap/
+  __init__.py
+  gap.py
+  test_knowledge_gap.py
+```
+
+## Core idea
+
+Review should not mean “ask everyone for opinions.”
+
+Review should mean:
+
+```text
+identify what information is missing
+ask the question most likely to reduce uncertainty
+record the answer as evidence
+```
+
+## Data model
+
+Create immutable value objects:
+
+```text
+KnowledgeGap
+- draft_id
+- question
+- category
+- source_label
+- reason_codes
+```
+
+```text
+ReviewQuestion
+- draft_id
+- knowledge_gap
+- question_text
+- target_reviewers
+```
+
+Categories:
+
+```text
+ordering
+assumption
+invariant
+authority_boundary
+evidence
+risk
+scope
+unknown
+```
+
+Reason codes should be deterministic strings, such as:
+
+```text
+ordering_uncertain
+hidden_assumption
+invariant_unclear
+authority_boundary_unclear
+missing_evidence
+high_risk
+scope_unclear
+```
+
+## Default Leira Review Question
+
+Provide a deterministic helper that creates the standard Leira review question:
+
+```text
+What is the single highest-leverage question, distinction, or hidden assumption that, if surfaced now, would most improve the likelihood that this work reaches its intended destination while remaining faithful to its mission?
+```
+
+The helper may include the following reviewer instructions:
+
+```text
+Prioritize hidden assumptions, category errors, missing invariants, ordering mistakes, irreversible decisions, simpler formulations, and things that should be deleted rather than added.
+
+Do not optimize for novelty.
+
+Do not search for problems merely to be useful.
+
+If the current slice is already appropriately scoped, say so explicitly.
+
+If you disagree with previous reviewers, preserve the disagreement rather than averaging it away.
+
+The goal is not consensus.
+
+The goal is to reveal information that is currently invisible.
+```
+
+## Determinism
+
+* No timestamps.
+* No clocks.
+* No randomness.
+* No generated IDs.
+* Same inputs produce same KnowledgeGap.
+* Same inputs produce same ReviewQuestion.
+* Target reviewers are supplied explicitly or derived from review_policy decision input.
+
+## Storage
+
+Default behavior: return objects as data.
+
+Optional helper may write a deterministic markdown review request to:
+
+```text
+.leira/review_questions/<draft_id>.review_question.md
+```
+
+This is derived scratch output.
+
+No ledger mutation.
+
+## Markdown output
+
+If rendered, include:
+
+1. Header
+2. Draft ID
+3. Category
+4. Reason Codes
+5. Target Reviewers
+6. Review Question
+7. Reviewer Instructions
+8. Non-Consensus Notice
+
+The notice must say:
+
+```text
+This review question is intended to reveal missing information.
+It does not request consensus, voting, approval, or authority transfer.
+```
+
+## Guardrails
+
+Do not implement:
+
+* feedback recording
+* prompt revision
+* approval
+* rejection
+* proposal system
+* dispatch
+* CLI
+* minds
+* adapters
+* browser automation
+* semantic analysis of feedback
+* automatic reviewer calls
+
+## Tests
+
+Verify:
+
+* deterministic KnowledgeGap creation
+* deterministic ReviewQuestion creation
+* default Leira review question text is stable
+* same input produces byte-identical markdown
+* target reviewers are preserved exactly
+* reason codes are preserved deterministically
+* no ledger mutation
+* no feedback/revision/approval/dispatch/CLI/mind/adapter code added
+* non-consensus notice is present
+
+## Definition of done
+
+A caller can create a targeted review question for a draft based on an explicit knowledge gap.
+
+Nothing else.

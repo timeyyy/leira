@@ -1,0 +1,378 @@
+# Leira v2.3 — Engineering State Projection
+
+## Mission
+
+Implement the deterministic **Engineering State Projection**.
+
+This is **not** a planner.
+
+This is **not** a dispatcher.
+
+This is **not** a workflow engine.
+
+This is **not** a recommendation engine.
+
+It is a deterministic read model that composes the existing projections into a single engineering snapshot.
+
+The Engineering State Projection answers one question:
+
+> "What is the current engineering state of this subject?"
+
+It performs no judgement.
+
+It performs no execution.
+
+It merely combines existing deterministic projections into a unified view.
+
+---
+
+# Architectural Review
+
+Leira now possesses multiple independent deterministic projections:
+
+- Lifecycle Projection
+- Missing Evidence Projection
+- Flow Policy Projection
+
+Each projection answers a different question.
+
+However, callers currently need to manually combine these projections to understand the current engineering state.
+
+That composition should itself become deterministic.
+
+This slice introduces the first composite read model.
+
+It owns no canonical state.
+
+It derives everything from supplied projections.
+
+---
+
+# Steward's Law
+
+Keep it boring.
+
+The Engineering State Projection may summarize existing projections.
+
+It must never infer new facts.
+
+It must never recommend actions.
+
+It must never execute work.
+
+---
+
+# Files
+
+Create:
+
+```text
+leira/engineering_state_projection/
+    __init__.py
+    engineering_state.py
+    test_engineering_state_projection.py
+```
+
+Modify nothing else unless strictly necessary.
+
+---
+
+# Public API
+
+Create immutable dataclasses.
+
+## EngineeringStateProjection
+
+Fields:
+
+```text
+subject_id
+
+subject_kind
+
+lifecycle_projection
+
+missing_evidence_projection
+
+flow_policy_projection
+
+summary
+
+```
+
+All fields immutable.
+
+No generated identifiers.
+
+No timestamps.
+
+No clocks.
+
+No UUIDs.
+
+No randomness.
+
+---
+
+## EngineeringSummary
+
+Create immutable value object.
+
+Fields:
+
+```text
+completed_evidence_count
+
+missing_evidence_count
+
+recommended_action
+
+matched_rule
+
+```
+
+These values are copied directly from supplied projections.
+
+No new computation beyond deterministic composition.
+
+---
+
+# Functions
+
+Implement:
+
+```text
+build_engineering_state_projection(...)
+```
+
+Inputs:
+
+```text
+LifecycleProjection
+
+MissingEvidenceProjection
+
+FlowPolicyProjection
+```
+
+Only.
+
+Do not inspect evidence directly.
+
+Do not reconstruct lifecycle.
+
+Do not evaluate flow policy.
+
+Do not load anything from disk.
+
+Do not inspect the repository.
+
+Return:
+
+```text
+EngineeringStateProjection
+```
+
+---
+
+Implement:
+
+```text
+engineering_state_projection_markdown(...)
+```
+
+Returns deterministic markdown.
+
+---
+
+Implement:
+
+```text
+write_engineering_state_projection(...)
+```
+
+Optional derived scratch writer.
+
+Writes:
+
+```text
+.leira/engineering_state/<subject_id>.engineering.md
+```
+
+Derived output only.
+
+---
+
+# Markdown Format
+
+```text
+# Engineering State Projection
+
+## Subject
+
+Subject ID:
+...
+
+Subject Kind:
+...
+
+## Lifecycle
+
+...
+
+## Missing Evidence
+
+...
+
+## Flow Policy
+
+...
+
+## Summary
+
+Completed Evidence:
+...
+
+Missing Evidence:
+...
+
+Recommended Action:
+...
+
+Matched Rule:
+...
+
+## Provenance Notice
+
+This projection composes deterministic projections into a single engineering snapshot.
+
+It performs no planning, recommendation, approval, dispatch, execution or workflow transitions.
+```
+
+Section order must never vary.
+
+---
+
+# Determinism Requirements
+
+Same supplied projections
+
+↓
+
+same Engineering State Projection
+
+↓
+
+same markdown
+
+↓
+
+same file bytes
+
+No sorting.
+
+No hidden state.
+
+No inference.
+
+No repository inspection.
+
+No filesystem inspection.
+
+No ledger access.
+
+No randomness.
+
+No timestamps.
+
+---
+
+# Tests
+
+Create comprehensive pytest coverage.
+
+Verify:
+
+- immutable dataclasses
+- deterministic projection creation
+- deterministic markdown
+- deterministic file output
+- byte-identical repeated rendering
+- byte-identical repeated writes
+- lifecycle projection preserved exactly
+- missing evidence projection preserved exactly
+- flow policy projection preserved exactly
+- summary values copied correctly
+- all-present scenario
+- mixed scenario
+- no-match flow policy scenario
+- no repository scanning
+- no filesystem inspection
+- no ledger access
+- no project-state mutation
+- no planner
+- no dispatcher
+- no recommendation engine
+- no workflow execution
+- no AI calls
+- no browser automation
+- no subprocess
+- no shell commands
+- no clocks
+- no timestamps
+- no UUIDs
+- no randomness
+
+---
+
+# Explicit Guardrails
+
+Do not implement:
+
+- planner
+- dispatcher
+- workflow engine
+- recommendation engine
+- approval
+- rejection
+- execution
+- subprocess
+- shell commands
+- CLI
+- browser automation
+- AI adapters
+- repository scanning
+- filesystem inspection
+- ledger access
+- database
+- project-state mutation
+
+---
+
+# Design Constraint
+
+The Engineering State Projection operates **only** on supplied projections.
+
+It must never inspect evidence directly.
+
+It must never reconstruct lifecycle state.
+
+It must never evaluate flow policy.
+
+It must never load artifacts from disk.
+
+Everything required for composition is supplied explicitly by the caller.
+
+---
+
+# Why This Slice Exists
+
+This is the first composite projection in Leira.
+
+Individual projections answer individual questions.
+
+The Engineering State Projection provides a deterministic engineering snapshot by composing those projections without introducing new behaviour.
+
+This creates a single, inspectable view of engineering state that future Human Decision, Dispatcher, and user interface layers can consume.
+
+It remains purely derived, deterministic, replayable, inspectable, and free of hidden authority.

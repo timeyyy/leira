@@ -1,0 +1,261 @@
+# Leira v3.2 — Human Decision Commit
+
+## Mission
+
+Implement the deterministic **Human Decision Commit**.
+
+This is **not** a planner.
+
+This is **not** a dispatcher.
+
+This is **not** autonomous.
+
+Its sole responsibility is to convert an explicitly approved HumanDecisionDraft into a HumanDecisionRecord.
+
+The commit is explicitly invoked by a human.
+
+Without an explicit commit request, nothing happens.
+
+---
+
+## Files
+
+Create:
+
+```text
+leira/human_decision_commit/
+    __init__.py
+    commit.py
+    test_human_decision_commit.py
+```
+
+Modify nothing else unless strictly necessary.
+
+---
+
+## Public API
+
+Create immutable dataclass:
+
+```text
+HumanDecisionCommit
+```
+
+Fields:
+
+```text
+commit_id
+
+draft_id
+
+human_decision
+```
+
+No generated identifiers.
+
+No timestamps.
+
+No clocks.
+
+No UUIDs.
+
+No randomness.
+
+---
+
+## Functions
+
+Implement:
+
+```text
+commit_human_decision(...)
+```
+
+Inputs:
+
+```text
+HumanDecisionDraft
+
+decision_id
+
+source_label
+
+decision_summary
+
+review_record_ids
+
+prompt_revision_id
+```
+
+Returns:
+
+```text
+HumanDecisionCommit
+```
+
+The function shall call the existing:
+
+```text
+create_human_decision(...)
+```
+
+exactly once.
+
+No additional logic.
+
+No inference.
+
+No field modification.
+
+---
+
+Implement:
+
+```text
+human_decision_commit_markdown(...)
+```
+
+Returns deterministic markdown.
+
+---
+
+Implement:
+
+```text
+write_human_decision_commit(...)
+```
+
+Writes:
+
+```text
+.leira/human_decision_commits/<commit_id>.commit.md
+```
+
+Derived output only.
+
+---
+
+## Markdown
+
+```text
+# Human Decision Commit
+
+## Commit ID
+
+...
+
+## Draft
+
+...
+
+## Human Decision
+
+...
+
+## Provenance Notice
+
+This commit records that a human explicitly chose to convert a Human Decision Draft into a Human Decision Record.
+
+No planning, approval logic, dispatch or execution occurs here.
+```
+
+Section order must never vary.
+
+---
+
+## Determinism Requirements
+
+Same inputs
+
+↓
+
+same commit
+
+↓
+
+same markdown
+
+↓
+
+same file bytes
+
+No sorting.
+
+No hidden state.
+
+No inference.
+
+No repository scanning.
+
+No filesystem inspection.
+
+No ledger access.
+
+No randomness.
+
+No timestamps.
+
+---
+
+## Tests
+
+Create comprehensive pytest coverage.
+
+Verify:
+
+- immutable dataclass
+- deterministic commit creation
+- deterministic markdown
+- deterministic file output
+- byte-identical repeated rendering
+- byte-identical repeated writes
+- create_human_decision invoked exactly once
+- HumanDecision preserved exactly
+- draft_id preserved exactly
+- commit_id preserved exactly
+- no repository scanning
+- no filesystem inspection
+- no ledger access
+- no project-state mutation
+- no planner
+- no dispatcher
+- no execution
+- no workflow engine
+- no AI calls
+- no browser automation
+- no subprocess
+- no shell commands
+- no clocks
+- no timestamps
+- no UUIDs
+- no randomness
+
+---
+
+## Explicit Guardrails
+
+Do not implement:
+
+- automatic approval
+- automatic commit
+- planner
+- dispatcher
+- workflow engine
+- execution
+- repository loading
+- policy loading
+- AI adapters
+- browser automation
+- CLI
+- database
+- project-state mutation
+
+---
+
+## Steward's Law
+
+Keep it boring.
+
+The commit exists only because a human explicitly requested it.
+
+Without explicit human invocation, no Human Decision Record is ever created.

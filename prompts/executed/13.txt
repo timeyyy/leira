@@ -1,0 +1,604 @@
+Implement Leira v1.2: Claim Store
+
+Mission
+
+Extend Leira from a machine that can perform work into a machine that guarantees exclusive access to work.
+
+The goal is not scheduling.
+
+The goal is not parallelism.
+
+The goal is not load balancing.
+
+The goal is to prove that an intent can be claimed mechanically by exactly one owner before execution.
+
+The machine must be able to say:
+
+> This intent was unclaimed.
+>
+> It was claimed by owner X.
+>
+> No other owner may claim it.
+>
+> Here is who owns it.
+>
+> Here is when it was claimed.
+>
+> If ownership is orphaned, it remains visible.
+
+Nothing more.
+
+Hard Constraints
+
+* Python only.
+* SQLite only.
+* Single process semantics first.
+* Blocking only.
+* Library, not service.
+* No threads.
+* No async.
+* No daemon.
+* No retries.
+* No scheduler.
+* No priorities.
+* No routing.
+* No load balancing.
+* No worker pools.
+* No leases.
+* No claim expiration.
+* No claim stealing.
+* No automatic recovery.
+* No orphan cleanup.
+* No memory.
+* No agent loops.
+* No LLM calls.
+
+Do not redesign:
+
+* ledger
+* lifecycle
+* inbox
+* dispatcher
+* registry
+* shell adapter
+* git adapter
+* worker protocol
+* projection engine
+* auditor
+
+Adapt existing structure minimally.
+
+Files
+
+```text
+leira/
+  claims/
+    claims.py
+    test_claims.py
+```
+
+Mission
+
+Claims coordinate.
+
+Claims do not schedule.
+
+Claims do not route.
+
+Claims prevent duplicate execution.
+
+Claims make ownership visible.
+
+Nothing more.
+
+Claim Ownership
+
+Create:
+
+```text
+intent_claim_projection
+```
+
+Fields:
+
+```python
+intent_id
+claim_id
+owner_id
+claimed_at
+last_event_id
+```
+
+Rules
+
+Only one active claim may exist per intent.
+
+A claim belongs to exactly one owner.
+
+Owners are opaque strings.
+
+Examples:
+
+```python
+dispatcher-1
+worker-a
+process-17
+```
+
+The kernel does not interpret owner identity.
+
+Claim API
+
+Implement:
+
+```python
+claim_intent(
+    intent_id: str,
+    owner_id: str
+) -> ClaimResult
+```
+
+Implement:
+
+```python
+release_claim(
+    intent_id: str,
+    owner_id: str
+) -> ReleaseResult
+```
+
+Implement:
+
+```python
+get_claim(
+    intent_id: str
+) -> ClaimInfo | None
+```
+
+Typed Results
+
+```python
+@dataclass(frozen=True)
+class ClaimInfo:
+    intent_id: str
+    claim_id: str
+    owner_id: str
+    claimed_at: str
+    last_event_id: str
+```
+
+```python
+@dataclass(frozen=True)
+class ClaimResult:
+    success: bool
+    claim_id: str | None
+    error_type: str | None = None
+```
+
+```python
+@dataclass(frozen=True)
+class ReleaseResult:
+    success: bool
+    error_type: str | None = None
+```
+
+Validation Rules
+
+Claim requires intent status:
+
+```text
+PENDING
+```
+
+Claim fails if:
+
+* intent is missing
+* owner_id is empty
+* owner_id is not a string
+* intent status is not PENDING
+* intent is already actively claimed
+
+Suggested errors:
+
+```python
+UNKNOWN_INTENT
+INVALID_OWNER
+INVALID_STATUS
+ALREADY_CLAIMED
+STORAGE_FAILURE
+```
+
+Release Rules
+
+Release requires:
+
+* active claim exists
+* owner_id matches active claim owner
+
+Release fails if:
+
+* intent has no active claim
+* owner_id does not match current owner
+* owner_id is invalid
+
+Suggested errors:
+
+```python
+NO_ACTIVE_CLAIM
+OWNER_MISMATCH
+INVALID_OWNER
+STORAGE_FAILURE
+```
+
+Claim Events
+
+Successful claim appends:
+
+```text
+intent_claimed
+```
+
+with:
+
+```python
+claim_id
+intent_id
+owner_id
+```
+
+Successful release appends:
+
+```text
+intent_released
+```
+
+with:
+
+```python
+claim_id
+intent_id
+owner_id
+```
+
+Rejected claim appends:
+
+```text
+intent_claim_rejected
+```
+
+Rejected release appends:
+
+```text
+intent_release_rejected
+```
+
+Rejected attempts are data.
+
+Do not discard them.
+
+Artifact Schema
+
+```python
+{
+    "type": "claim",
+    "content": {
+        "claim_id": "...",
+        "intent_id": "...",
+        "owner_id": "...",
+        "action": "CLAIMED",
+        "error_type": None
+    }
+}
+```
+
+For rejected attempts:
+
+```python
+{
+    "type": "claim",
+    "content": {
+        "claim_id": None,
+        "intent_id": "...",
+        "owner_id": "...",
+        "action": "REJECTED",
+        "error_type": "ALREADY_CLAIMED"
+    }
+}
+```
+
+Kernel Rules
+
+Claims do not:
+
+* execute work
+* select workers
+* retry
+* expire
+* migrate
+* rebalance
+* clean orphaned claims
+* guess process liveness
+
+Claims only establish and release ownership.
+
+Projection
+
+Create:
+
+```text
+intent_claim_projection
+```
+
+Fields:
+
+```python
+intent_id
+claim_id
+owner_id
+claimed_at
+last_event_id
+```
+
+Projection is derived.
+
+claimed_at must come from the ledger event timestamp.
+
+Never use:
+
+```python
+datetime.now()
+```
+
+during rebuild.
+
+Projection Rebuild
+
+Extend rebuild logic.
+
+Scan events chronologically:
+
+```text
+intent_claimed
+intent_released
+```
+
+Reconstruct active claims.
+
+Rules:
+
+* intent_claimed creates active claim.
+* intent_released removes active claim only if owner_id and claim_id match.
+* released claims disappear from projection.
+* a claim without release remains active.
+* orphaned claims remain visible.
+* duplicate active claims must be detectable by audit.
+
+Rebuild must be:
+
+* deterministic
+* idempotent
+* transactional
+
+Do not silently overwrite duplicate active claims.
+
+Do not repair malformed history.
+
+Audit Extension
+
+Verify:
+
+* at most one active claim exists per intent
+* claim owner matches ledger
+* claim_id matches ledger
+* claimed_at equals ledger event created_at
+* last_event_id equals claim event id
+* duplicate active claims are detected
+* released claims disappear from projection
+* release owner matches claim owner
+* release claim_id matches active claim_id
+* claim projection matches history
+* orphaned claims are visible, not repaired
+
+Audit remains read-only.
+
+Audit reports disagreement.
+
+It does not repair.
+
+Dispatcher Integration
+
+Before execution, dispatcher must claim:
+
+```python
+claim_intent(intent_id, owner_id)
+```
+
+Dispatcher executes only if claim succeeds.
+
+After terminal state, dispatcher must release:
+
+```python
+release_claim(intent_id, owner_id)
+```
+
+If release fails after execution:
+
+* record typed failure
+* do not pretend claim was released
+* leave orphaned claim visible
+* audit should surface it
+
+No automatic retry.
+
+No orphan cleanup.
+
+Keep dispatcher dumb.
+
+Preferred wrapper:
+
+```python
+dispatch_and_track(
+    intent_id,
+    owner_id,
+    worker
+)
+```
+
+Algorithm:
+
+1. claim intent
+2. if claim fails, return typed DispatchResult with claim error
+3. dispatch once
+4. release claim
+5. return dispatch result, preserving release failure if relevant
+
+Failure Model
+
+Claim rejection is data.
+
+Release rejection is data.
+
+Orphaned claim is visible state.
+
+Not automatic cleanup.
+
+A crashed process may leave an active claim forever.
+
+This is intentional.
+
+The honest machine exposes ownership problems.
+
+It does not guess.
+
+Stress Test
+
+Claim:
+
+```text
+100 intents
+```
+
+Release:
+
+```text
+100 intents
+```
+
+Verify:
+
+* no duplicate claims
+* released claims disappear
+* projections rebuild correctly
+* audit passes
+
+Also test:
+
+* one orphaned claim remains visible
+* audit reports it as active, not automatically wrong
+
+Tests
+
+Required tests
+
+1. claim succeeds for PENDING intent.
+2. claim rejected for unknown intent.
+3. claim rejected for invalid owner.
+4. claim rejected for non-PENDING intent.
+5. duplicate claim rejected.
+6. release succeeds for matching owner.
+7. release rejected when no active claim exists.
+8. release rejected for wrong owner.
+9. intent_claimed event recorded.
+10. intent_released event recorded.
+11. intent_claim_rejected event recorded.
+12. intent_release_rejected event recorded.
+13. claim artifact recorded.
+14. rejected claim artifact recorded.
+15. projection rebuilt correctly.
+16. claimed_at derived from ledger timestamp.
+17. released claims disappear from projection.
+18. orphaned claims remain visible.
+19. duplicate active claims detected by audit.
+20. release owner mismatch detected by audit.
+21. projection loss recoverable.
+22. rebuild deterministic.
+23. rebuild idempotent.
+24. audit validates claims.
+25. audit remains read-only.
+26. dispatcher requires claim before execution.
+27. dispatcher releases claim after terminal state.
+28. release failure remains visible.
+29. no leases exist.
+30. no expiration exists.
+31. no stealing exists.
+32. no orphan cleanup exists.
+33. 100-intent claim/release stress test passes.
+34. validate_chain() still succeeds.
+35. typed failures preferred over exceptions.
+
+Explicitly Deferred
+
+* distributed coordination
+* leases
+* claim expiration
+* stealing
+* retries
+* priorities
+* scheduling
+* routing
+* worker pools
+* load balancing
+* liveness checks
+* orphan cleanup
+* automatic recovery
+* OpenAI
+* Claude
+* Gemini
+* MCP
+* agent loops
+
+Definition of Done
+
+Leira can establish exclusive ownership without establishing intelligence.
+
+One intent.
+
+One active claim.
+
+One owner.
+
+No duplicate execution.
+
+Orphans are visible.
+
+Claims coordinate.
+
+They do not decide.
+
+Remember:
+
+Workers think.
+
+Kernel gates.
+
+Ledger remembers.
+
+Projections serve.
+
+Auditors verify.
+
+Intent enters.
+
+Dispatch happens.
+
+Workers are named.
+
+Claims establish ownership.
+
+A scheduler chooses.
+
+A claim store locks.
+
+Build the claim store.
+
+Do not build the scheduler.

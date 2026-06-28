@@ -1,0 +1,539 @@
+Implement Leira v1.8: Environment Snapshots
+
+Mission
+
+Extend Leira from a machine that records history into a machine that records what it was when work executed.
+
+The goal is not deployment.
+
+The goal is not dependency management.
+
+The goal is not reproducible builds.
+
+The goal is to prove that the execution environment can be captured as evidence before a worker runs.
+
+The machine must be able to say:
+
+> This work was requested.
+>
+> This source state was observed.
+>
+> This Python runtime was observed.
+>
+> These packages were observed.
+>
+> This platform was observed.
+>
+> Execution proceeded only after context was captured.
+
+Nothing more.
+
+Hard Constraints
+
+* Python only.
+* SQLite only.
+* Local filesystem only.
+* Single process only.
+* Blocking only.
+* Library, not service.
+* No threads.
+* No async.
+* No daemon.
+* No virtual environment creation.
+* No package installation.
+* No package updates.
+* No dependency solving.
+* No Docker.
+* No containers.
+* No Nix.
+* No deployment.
+* No cloud.
+* No environment enforcement.
+* No LLM calls.
+* No agent loops.
+
+Do not redesign:
+
+* ledger
+* lifecycle
+* inbox
+* dispatcher
+* registry
+* claims
+* receipts
+* workspace
+* provenance
+* sessions
+* archive
+* auditor
+
+Adapt existing structure minimally.
+
+Files
+
+```text
+leira/
+  environment/
+    environment.py
+    test_environment.py
+```
+
+Mission
+
+Environment snapshots preserve context.
+
+They do not control context.
+
+They do not judge context.
+
+They do not manage context.
+
+Nothing more.
+
+Environment Snapshot
+
+Implement:
+
+```python
+@dataclass(frozen=True)
+class EnvironmentSnapshot:
+    snapshot_id: str
+    intent_id: str
+    python_version: str
+    platform: str
+    executable: str
+    installed_packages: list[PackageInfo]
+    created_at: str
+    error_type: str | None = None
+    stderr: str = ""
+```
+
+PackageInfo
+
+```python
+@dataclass(frozen=True)
+class PackageInfo:
+    name: str
+    version: str
+```
+
+Capture Source
+
+Use standard library only:
+
+```python
+sys.version
+sys.executable
+platform.platform()
+importlib.metadata.distributions()
+```
+
+Package Capture
+
+Use:
+
+```python
+from importlib.metadata import distributions
+```
+
+Capture packages as:
+
+```python
+PackageInfo(
+    name=distribution.metadata["Name"],
+    version=distribution.version
+)
+```
+
+Rules:
+
+* package list must be deterministic
+* sort packages by normalized lowercase name, then version
+* preserve package names as reported
+* do not install anything
+* do not update anything
+* do not validate package quality
+
+Snapshot API
+
+Implement:
+
+```python
+capture_environment(
+    intent_id: str
+) -> EnvironmentSnapshot
+```
+
+Implement:
+
+```python
+get_environment(
+    snapshot_id: str
+) -> EnvironmentSnapshot | None
+```
+
+Capture Timing
+
+Capture environment immediately before worker execution.
+
+Capture after provenance.
+
+Sequence:
+
+```text
+claim intent
+capture provenance
+capture environment
+execute worker
+```
+
+Environment capture represents:
+
+```text
+runtime context at execution start
+```
+
+Do not capture after execution.
+
+Do not update snapshots after execution.
+
+Successful Capture Event
+
+Successful capture appends:
+
+```text
+environment_captured
+```
+
+Artifact:
+
+```python
+{
+    "type": "environment",
+    "content": {
+        "snapshot_id": "...",
+        "intent_id": "...",
+        "python_version": "...",
+        "platform": "...",
+        "executable": "...",
+        "installed_packages": [
+            {
+                "name": "...",
+                "version": "..."
+            }
+        ],
+        "error_type": None,
+        "stderr": ""
+    }
+}
+```
+
+Failed Capture Event
+
+If capture fails:
+
+append:
+
+```text
+environment_capture_failed
+```
+
+Artifact:
+
+```python
+{
+    "type": "environment",
+    "content": {
+        "snapshot_id": "...",
+        "intent_id": "...",
+        "python_version": "",
+        "platform": "",
+        "executable": "",
+        "installed_packages": [],
+        "error_type": "UNEXPECTED",
+        "stderr": "..."
+    }
+}
+```
+
+Rules for failure:
+
+* failed capture is history
+* failed capture is not hidden
+* failed capture prevents worker execution
+* mark intent_failed
+* release claim if possible
+* return typed failure
+
+Suggested errors:
+
+```text
+UNEXPECTED
+STORAGE_FAILURE
+```
+
+Kernel Rules
+
+The kernel does not:
+
+* require specific Python versions
+* judge package versions
+* install packages
+* update packages
+* enforce environments
+* create environments
+* compare environments
+* solve dependencies
+
+It records what existed.
+
+Nothing more.
+
+Ledger Size Rule
+
+Capturing packages may create large event payloads.
+
+For v1.8, keep it boring:
+
+* store package metadata directly in the event payload
+* enforce existing artifact/event size limits if present
+* if size limits are exceeded, record environment_capture_failed with error_type="ARTIFACT_TOO_LARGE"
+
+Do not introduce file-backed environment snapshots yet.
+
+That is deferred.
+
+Receipt Integration
+
+Receipt bundles should reference or include structured:
+
+```python
+EnvironmentSnapshot
+```
+
+Receipts should answer:
+
+```text
+What runtime context was observed before execution?
+```
+
+Not:
+
+```text
+Was that context correct?
+```
+
+Projection
+
+Create:
+
+```text
+environment_projection
+```
+
+Fields:
+
+```python
+snapshot_id
+intent_id
+python_version
+platform
+executable
+created_at
+error_type
+last_event_id
+```
+
+Projection is derived.
+
+created_at comes from ledger timestamps.
+
+Never use:
+
+```python
+datetime.now()
+```
+
+during rebuild.
+
+Projection Rebuild
+
+Scan:
+
+```text
+environment_captured
+environment_capture_failed
+```
+
+events.
+
+Successful and failed captures both appear in projection.
+
+Rebuild must be:
+
+* deterministic
+* idempotent
+* transactional
+
+Audit Extension
+
+Verify:
+
+* environment_projection matches ledger
+* snapshot ids are unique
+* receipts reference valid environment snapshots
+* failed captures are preserved
+* package lists are deterministic in stored event payloads
+* created_at equals ledger event timestamp
+
+Audit remains read-only.
+
+Audit does not compare against the current environment.
+
+The environment may legitimately change later.
+
+Truth is historical.
+
+Not present state.
+
+Failure Model
+
+Python executable changing later is acceptable.
+
+Packages changing later is acceptable.
+
+Platform changing later is acceptable.
+
+Environment snapshots record observed history.
+
+Not current reality.
+
+If the machine cannot capture its own environment before execution:
+
+* do not execute worker
+* record failure
+* leave evidence
+
+Stress Test
+
+Execute or attempt:
+
+```text
+100 intents
+```
+
+Capture:
+
+```text
+100 environment snapshots
+```
+
+Verify:
+
+* rebuild succeeds
+* audit passes
+* receipts contain environment references
+* no worker executes after failed environment capture
+
+Tests
+
+Required tests
+
+1. environment capture succeeds.
+2. environment capture failure is recorded.
+3. environment capture failure prevents worker execution.
+4. environment capture failure marks intent_failed.
+5. claim is released after failed environment capture where possible.
+6. python version preserved.
+7. platform preserved.
+8. executable preserved.
+9. package list preserved.
+10. package list sorted deterministically.
+11. package names preserved as reported.
+12. projection rebuilt correctly.
+13. failed captures included in projection.
+14. created_at derived from ledger timestamp.
+15. receipts reference environment snapshots.
+16. snapshot ids unique.
+17. audit validates environment projection.
+18. audit validates failed captures.
+19. audit remains read-only.
+20. audit does not inspect current environment.
+21. rebuild deterministic.
+22. rebuild idempotent.
+23. validate_chain() still succeeds.
+24. current package changes after capture do not invalidate history.
+25. current Python executable changes after capture do not invalidate history.
+26. oversized package payload records environment_capture_failed.
+27. no package installation occurs.
+28. no environment creation occurs.
+29. no containers are used.
+30. 100-snapshot stress test passes.
+
+Explicitly Deferred
+
+* Docker
+* Nix
+* virtualenv creation
+* package installation
+* package updates
+* dependency solving
+* reproducible builds
+* containers
+* cloud execution
+* environment enforcement
+* environment comparison
+* file-backed environment snapshots
+* OpenAI
+* Claude
+* Gemini
+* MCP
+* agent loops
+
+Definition of Done
+
+Leira can preserve execution context.
+
+Environment is evidence.
+
+Not policy.
+
+Not configuration.
+
+Not control.
+
+If context cannot be captured,
+
+execution does not proceed.
+
+The system records what it was
+
+when it did what it did.
+
+Remember:
+
+Workers think.
+
+Kernel gates.
+
+Ledger remembers.
+
+Projections serve.
+
+Auditors verify.
+
+Receipts preserve evidence.
+
+Files preserve bytes.
+
+Git preserves provenance.
+
+Sessions preserve relationships.
+
+Archives preserve history.
+
+Environment preserves context.
+
+Build context.
+
+Do not build deployment.

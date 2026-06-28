@@ -1,0 +1,286 @@
+Implement Leira v0.8: Auditor
+
+Mission
+
+Extend Leira from a machine that remembers into a machine that verifies.
+
+The goal is not repair.
+
+The goal is to prove that corruption, drift, and disagreement can be detected mechanically.
+
+The machine must be able to say:
+
+> This ledger chain is valid.
+>
+> This ledger chain is broken.
+>
+> This projection agrees with history.
+>
+> This projection disagrees with history.
+>
+> Here is where reality diverged.
+
+Nothing more.
+
+Hard Constraints
+
+* Python only.
+* SQLite only.
+* Single process only.
+* Blocking only.
+* Library, not service.
+* No threads.
+* No async.
+* No daemon.
+* No routing.
+* No retries.
+* No scheduler.
+* No quotas.
+* No memory.
+* No background tasks.
+* No repair.
+* No automatic mutation.
+* No rebuild during audit.
+* No LLM calls.
+* No agent loops.
+
+Do not redesign:
+
+* ledger
+* envelope
+* lifecycle
+* shell adapter
+* git adapter
+* worker protocol
+* projection engine
+
+Adapt existing structure minimally.
+
+Files
+
+```text
+leira/
+  audit/
+    auditor.py
+    test_auditor.py
+```
+
+Audit API
+
+Implement:
+
+```python
+@dataclass(frozen=True)
+class AuditResult:
+    success: bool
+    chain_valid: bool
+    projections_valid: bool
+    errors: list[str]
+```
+
+Implement:
+
+```python
+audit() -> AuditResult
+```
+
+Rules
+
+Audit is read-only.
+
+Audit must not mutate:
+
+* ledger
+* projections
+* lifecycle state
+* artifacts
+
+Auditors verify.
+
+They do not heal.
+
+Ledger Verification
+
+Verify:
+
+* every event id exists
+* every hash exists
+* previous_hash links are correct
+* event ordering is monotonic
+* missing links are detected
+* duplicate event ids are detected
+* corrupted hashes are detected
+* required event fields are present
+* run_id is present where required
+
+Projection Verification
+
+Audit must reconstruct the expected projection in temporary memory only.
+
+Do not call:
+
+```python
+rebuild_projection()
+```
+
+during audit.
+
+Recompute expected projection from ledger events using:
+
+```text
+run_id
+event_type
+event_id
+created_at
+```
+
+Verify projection fields exactly:
+
+```text
+current_state
+last_event_id
+updated_at
+```
+
+Important:
+
+```text
+updated_at must equal the ledger event created_at.
+```
+
+Never treat projection updated_at as audit time.
+
+Never use datetime.now() in audit comparison.
+
+Projection disagreement must be reported.
+
+Not repaired.
+
+Lifecycle Verification
+
+Verify legal lifecycle ordering.
+
+Examples of illegal transitions:
+
+```text
+state_completed without state_running
+artifact_written before state_running
+state_running after state_completed
+```
+
+Illegal transitions should produce deterministic audit errors.
+
+Artifact Verification
+
+Verify:
+
+* artifact events have required fields
+* artifact ids are unique where applicable
+* artifact_written references valid run_id
+* oversized/truncated artifacts remain valid structured data
+
+Audit Errors
+
+Use deterministic error codes.
+
+Examples:
+
+```python
+[
+    "BROKEN_HASH_CHAIN",
+    "MISSING_PREVIOUS_HASH",
+    "DUPLICATE_EVENT_ID",
+    "MISSING_RUN_ID",
+    "ILLEGAL_TRANSITION",
+    "PROJECTION_MISMATCH",
+    "PROJECTION_UPDATED_AT_MISMATCH",
+    "PROJECTION_LAST_EVENT_ID_MISMATCH",
+    "ARTIFACT_SCHEMA_INVALID"
+]
+```
+
+Error ordering must be stable.
+
+Same corruption must produce same errors.
+
+Failure Model
+
+Audit failure is a receipt.
+
+Not a mutation.
+
+Projection corruption is recoverable.
+
+Ledger corruption is not.
+
+Audit reports both.
+
+It fixes neither.
+
+Tests
+
+Required tests
+
+1. valid chain passes.
+2. broken hash detected.
+3. missing previous_hash detected.
+4. duplicate event id detected.
+5. missing run_id detected.
+6. illegal lifecycle transition detected.
+7. projection current_state mismatch detected.
+8. projection last_event_id mismatch detected.
+9. projection updated_at mismatch detected.
+10. audit uses ledger created_at, not datetime.now().
+11. audit never mutates ledger.
+12. audit never mutates projections.
+13. audit never calls rebuild_projection().
+14. audit deterministic.
+15. error ordering stable.
+16. multiple corruptions detected simultaneously.
+17. artifact schema corruption detected.
+18. validate_chain() remains separate from audit.
+19. projection disagreement favors ledger.
+20. audit is read-only.
+
+Explicitly Deferred
+
+* automatic repair
+* repair suggestions
+* rebuild during audit
+* anomaly scoring
+* dashboards
+* notifications
+* monitoring
+* background audits
+* LLM explanations
+* agent loops
+
+Definition of Done
+
+Leira can verify itself.
+
+Ledger corruption is detectable.
+
+Projection drift is detectable.
+
+Projection timestamps are checked against ledger timestamps.
+
+Auditors do not repair.
+
+They witness disagreement.
+
+Remember:
+
+Workers think.
+
+Kernel gates.
+
+Ledger remembers.
+
+Projections serve.
+
+Auditors verify.
+
+Truth lives in history.
+
+Repair belongs elsewhere.

@@ -1,0 +1,532 @@
+Implement Leira v1.1: Worker Registry
+
+Mission
+
+Extend Leira from a machine that executes one explicitly supplied worker into a machine that can mechanically resolve named workers.
+
+The goal is not routing.
+
+The goal is not intelligence.
+
+The goal is not automatic worker selection.
+
+The goal is to prove that workers can be registered, looked up, and dispatched by explicit name without changing dispatcher logic.
+
+The machine must be able to say:
+
+> A worker named "EchoWorker" was registered.
+>
+> Here is the worker associated with that exact name.
+>
+> The worker was found or not found.
+>
+> No reasoning occurred.
+>
+> No worker was chosen automatically.
+
+Nothing more.
+
+Hard Constraints
+
+* Python only.
+* SQLite only.
+* Single process only.
+* Blocking only.
+* Library, not service.
+* In-memory registry only.
+* No threads.
+* No async.
+* No daemon.
+* No routing.
+* No retries.
+* No scheduler.
+* No priorities.
+* No automatic worker selection.
+* No memory.
+* No background tasks.
+* No agent loops.
+* No LLM calls.
+* No plugin loading.
+* No dynamic imports.
+* No module scanning.
+* No capability inference.
+
+Do not redesign:
+
+* ledger
+* lifecycle
+* inbox
+* dispatcher
+* shell adapter
+* git adapter
+* worker protocol
+* projection engine
+* auditor
+
+Adapt existing structure minimally.
+
+Files
+
+```text
+leira/
+  registry/
+    registry.py
+    test_registry.py
+```
+
+Mission
+
+Workers are named guests.
+
+The registry is the reception desk.
+
+The dispatcher remains stupid.
+
+The registry resolves names.
+
+It does not choose.
+
+It does not route.
+
+It does not instantiate.
+
+Architecture Boundary
+
+A router selects.
+
+A registry resolves.
+
+Leira v1.1 must only resolve.
+
+The caller remains responsible for choosing:
+
+```python
+worker_name
+```
+
+Registry Storage
+
+Use a simple in-process dictionary:
+
+```python
+dict[str, Worker]
+```
+
+The registry stores references only.
+
+It must not clone workers.
+
+It must not serialize workers.
+
+It must not instantiate workers.
+
+It must not dynamically import workers.
+
+Worker Registration API
+
+Implement:
+
+```python
+register_worker(
+    worker: Worker
+) -> RegisterResult
+```
+
+Implement:
+
+```python
+get_worker(
+    worker_name: str
+) -> Worker | None
+```
+
+Implement:
+
+```python
+list_workers() -> list[str]
+```
+
+Typed Result
+
+```python
+@dataclass(frozen=True)
+class RegisterResult:
+    success: bool
+    worker_name: str | None
+    error_type: str | None = None
+```
+
+Worker Name Rules
+
+Worker names:
+
+* come from worker.name
+* must be non-empty strings
+* must be unique
+* are case-sensitive
+* are immutable after registration
+* are provenance metadata
+* are not routing metadata
+
+Duplicate registration returns:
+
+```python
+error_type="DUPLICATE_WORKER"
+```
+
+Invalid worker returns:
+
+```python
+error_type="INVALID_WORKER"
+```
+
+Unknown lookup returns:
+
+```python
+None
+```
+
+Case Sensitivity
+
+If registered:
+
+```python
+echoworker
+```
+
+then lookup:
+
+```python
+EchoWorker
+```
+
+must fail.
+
+Honesty requires exact names.
+
+Ledger Integration
+
+Successful registration must append:
+
+```text
+worker_registered
+```
+
+Rejected registration must append:
+
+```text
+worker_registration_rejected
+```
+
+Registration event content must include:
+
+```python
+worker_name
+status
+error_type
+```
+
+Successful artifact:
+
+```python
+{
+    "type": "worker_registration",
+    "content": {
+        "worker_name": "EchoWorker",
+        "status": "REGISTERED",
+        "error_type": None
+    }
+}
+```
+
+Rejected artifact:
+
+```python
+{
+    "type": "worker_registration",
+    "content": {
+        "worker_name": "EchoWorker",
+        "status": "REJECTED",
+        "error_type": "DUPLICATE_WORKER"
+    }
+}
+```
+
+Registry-Ledger Atomicity
+
+Do not allow registry memory and ledger history to diverge.
+
+For successful registration:
+
+1. validate worker
+2. append worker_registered to ledger
+3. update in-memory registry only after ledger append succeeds
+
+If ledger append fails:
+
+* do not store worker in registry
+* return typed failure
+* error_type="STORAGE_FAILURE"
+
+For rejected registration:
+
+* append worker_registration_rejected where possible
+* return typed failure
+* do not store worker in registry
+
+No successful in-memory registration may exist without a ledger event.
+
+Dispatcher Integration
+
+Add:
+
+```python
+dispatch_by_name(
+    intent_id: str,
+    worker_name: str
+)
+```
+
+Algorithm:
+
+1. lookup worker by exact name
+2. if worker missing, return:
+
+```python
+UNKNOWN_WORKER
+```
+
+3. otherwise delegate directly to:
+
+```python
+dispatch_once(
+    intent_id,
+    worker
+)
+```
+
+No extra logic.
+
+No special path.
+
+No fallback.
+
+No routing.
+
+No worker choice.
+
+Kernel Rules
+
+The registry does not:
+
+* rank workers
+* choose workers
+* inspect outputs
+* inspect payloads
+* instantiate workers
+* load modules
+* resolve dependencies
+* infer capabilities
+* scan packages
+* fallback to similar names
+
+The registry records and resolves:
+
+```python
+worker_name
+```
+
+Nothing more.
+
+Projection
+
+Create:
+
+```text
+worker_projection
+```
+
+Fields:
+
+```python
+worker_name
+registered_at
+last_event_id
+```
+
+Projection is derived.
+
+Projection loss is recoverable.
+
+registered_at must come from the ledger event timestamp.
+
+Do not use datetime.now() during rebuild.
+
+Projection Rebuild
+
+Extend rebuild logic to reconstruct:
+
+```text
+worker_projection
+```
+
+from ledger events.
+
+Only:
+
+```text
+worker_registered
+```
+
+events create registered workers in projection.
+
+Rejected registration events do not create registered workers.
+
+Rebuild must be deterministic.
+
+Rebuild must be idempotent.
+
+Rebuild must be transactional.
+
+Audit Extension
+
+Extend audit to verify:
+
+* worker names are unique
+* registration events exist
+* duplicate registrations are reported
+* worker_projection matches ledger
+* registered_at equals ledger event created_at
+* last_event_id equals worker_registered event id
+* rejected registrations do not appear as registered workers
+* registry introduces no routing semantics
+
+Audit remains read-only.
+
+Audit reports disagreement.
+
+It does not repair.
+
+Registry vs Projection
+
+The in-memory registry cannot be reconstructed from the ledger because worker objects are process references.
+
+The worker_projection can be reconstructed from the ledger because names are history.
+
+Do not pretend ledger replay can recreate Python objects.
+
+It can only recreate the record that a name was registered.
+
+Stress Test
+
+Register:
+
+```text
+100 workers
+```
+
+Verify:
+
+* lookup succeeds for exact names
+* wrong-case lookup fails
+* list_workers is deterministic
+* projection rebuild succeeds
+* audit passes
+
+Tests
+
+Required tests
+
+1. worker registration succeeds.
+2. duplicate registration rejected.
+3. invalid worker rejected.
+4. unknown worker returns None.
+5. exact lookup succeeds.
+6. wrong-case lookup fails.
+7. list_workers deterministic.
+8. worker_registered event recorded.
+9. worker_registration_rejected event recorded.
+10. registry update happens only after successful ledger append.
+11. ledger append failure prevents in-memory registration.
+12. rejected registration never stores worker.
+13. projection rebuilt correctly.
+14. registered_at comes from ledger timestamp.
+15. audit validates registry projection.
+16. audit detects duplicate registration history.
+17. dispatch_by_name delegates to dispatch_once.
+18. dispatch_by_name returns UNKNOWN_WORKER for missing name.
+19. no routing logic introduced.
+20. worker names are case-sensitive.
+21. worker names immutable after registration.
+22. registry stores references only.
+23. registry does not instantiate workers.
+24. no dynamic imports or plugins exist.
+25. 100-worker stress test passes.
+26. validate_chain() still succeeds.
+27. typed failures preferred over exceptions.
+28. projection loss recoverable.
+29. audit remains read-only.
+30. worker_projection does not imply Python object reconstruction.
+
+Explicitly Deferred
+
+* routing
+* priorities
+* capabilities
+* tags
+* dependency injection
+* plugin loading
+* automatic discovery
+* dynamic imports
+* module scanning
+* load balancing
+* retries
+* OpenAI
+* Claude
+* Gemini
+* MCP
+* agent loops
+* parallel execution
+* persistent worker objects
+
+Definition of Done
+
+Leira can remember workers by exact name.
+
+Workers remain guests.
+
+The dispatcher remains stupid.
+
+Lookup is mechanical.
+
+Selection belongs to the caller.
+
+The ledger remembers which names entered the workshop.
+
+The registry holds live process references only.
+
+Remember:
+
+Workers think.
+
+Kernel gates.
+
+Ledger remembers.
+
+Projections serve.
+
+Auditors verify.
+
+Intent enters.
+
+Dispatch happens.
+
+Workers are named.
+
+A router chooses.
+
+A registry resolves.
+
+Build the registry.
+
+Do not build the router.

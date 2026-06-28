@@ -1,0 +1,327 @@
+# Leira v4.5 — Execution Request Layer
+
+## Mission
+
+Implement the deterministic **Execution Request Layer**.
+
+This layer converts a selected adapter into an immutable execution request.
+
+It performs **no execution**.
+
+It is **not** orchestration.
+
+It is **not** scheduling.
+
+It is **not** a worker.
+
+It is **not** an adapter implementation.
+
+Its sole responsibility is to describe exactly what an execution adapter would receive.
+
+---
+
+## Context
+
+The following layers already exist and are considered complete:
+
+* Dispatch Draft
+* Dispatch Commit
+* Dispatcher Kernel
+* Dispatcher Kernel Receipt Layer
+* Execution Adapter Contract
+* Execution Adapter Compatibility Check
+* Execution Adapter Selection Kernel
+
+Treat these as stable.
+
+Do not redesign them.
+
+---
+
+# Architecture
+
+Current pipeline:
+
+```text
+DispatchRecord
+      │
+      ▼
+Dispatcher Kernel
+      │
+      ▼
+DispatchPlan
+      │
+      ▼
+Compatibility
+      │
+      ▼
+Selection
+```
+
+This prompt introduces:
+
+```text
+Selection
+      │
+      ▼
+Execution Request
+```
+
+Execution itself remains outside Leira.
+
+---
+
+# Files
+
+Create:
+
+```text
+leira/execution_request/
+    __init__.py
+    request.py
+    test_execution_request.py
+```
+
+Modify nothing else unless strictly necessary.
+
+---
+
+# Public API
+
+Create immutable dataclasses.
+
+## ExecutionRequest
+
+Fields:
+
+```text
+dispatch_plan
+execution_capability
+adapter_label
+dispatch_id
+request_summary
+```
+
+`request_summary` is a deterministic human-readable description.
+
+No timestamps.
+
+No UUIDs.
+
+No randomness.
+
+No execution state.
+
+---
+
+## ExecutionRequestResult
+
+Fields:
+
+```text
+adapter_selection
+execution_request
+```
+
+---
+
+# Functions
+
+Implement:
+
+```text
+build_execution_request(...)
+```
+
+Inputs:
+
+```text
+DispatchPlan
+ExecutionCapability
+```
+
+Returns:
+
+```text
+ExecutionRequest
+```
+
+The supplied capability **must already be compatible**.
+
+If incompatible, raise an appropriate deterministic exception.
+
+No mutation.
+
+No execution.
+
+---
+
+Implement:
+
+```text
+build_execution_request_result(...)
+```
+
+Returns:
+
+```text
+ExecutionRequestResult
+```
+
+Pure aggregation only.
+
+---
+
+Implement:
+
+```text
+execution_request_markdown(...)
+```
+
+Render exactly these top-level sections:
+
+```text
+# Execution Request
+
+## Dispatch Plan
+
+## Execution Capability
+
+## Execution Request
+
+## Provenance Notice
+```
+
+---
+
+Implement:
+
+```text
+write_execution_request(...)
+```
+
+Writes:
+
+```text
+.leira/execution_request/<dispatch_id>.<adapter_label>.request.md
+```
+
+Derived output only.
+
+---
+
+# Request Rules
+
+The request contains only deterministic information already present in:
+
+* DispatchPlan
+* ExecutionCapability
+
+No runtime values.
+
+No environment inspection.
+
+No filesystem inspection.
+
+No repository scanning.
+
+No generated identifiers.
+
+No timestamps.
+
+---
+
+# Determinism
+
+Identical inputs must produce identical:
+
+* ExecutionRequest
+* ExecutionRequestResult
+* markdown
+* file bytes
+* output path
+
+---
+
+# Tests
+
+Create comprehensive pytest coverage verifying:
+
+* immutable dataclasses
+* compatible request generation
+* incompatible capability rejection
+* deterministic request generation
+* deterministic markdown
+* deterministic file output
+* repeated rendering byte-identical
+* repeated writes byte-identical
+* DispatchPlan preserved exactly
+* ExecutionCapability preserved exactly
+* no execution
+* no scheduling
+* no orchestration
+* no planner
+* no subprocess
+* no shell commands
+* no AI calls
+* no networking
+* no repository scanning
+* no timestamps
+* no UUIDs
+* no randomness
+
+Run the dedicated suite and repository-wide suite if practical.
+
+---
+
+# Explicit Guardrails
+
+Do not implement:
+
+* execution
+* adapter invocation
+* subprocesses
+* worker management
+* scheduling
+* retries
+* queueing
+* orchestration
+* AI calls
+* networking
+* browser automation
+* repository loading
+* databases
+* project-state mutation
+
+This layer prepares an execution request only.
+
+---
+
+# Deliverables
+
+Provide:
+
+1. Files changed
+2. Test commands executed
+3. Test results
+4. Example execution request markdown
+5. Example dataclass instances
+6. Recommended smallest next commit
+
+Suggested commit message:
+
+```text
+Add deterministic execution request layer
+```
+
+---
+
+# Steward's Law
+
+Keep it boring.
+
+The Selection Kernel determines which adapters are compatible.
+
+The Execution Request Layer determines exactly what a compatible adapter would receive.
+
+Neither layer may execute anything.

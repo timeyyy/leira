@@ -1,0 +1,215 @@
+Implement Leira v0.1: Operation Envelope
+
+Mission
+
+Extend the existing v0 Local Event Ledger with the smallest possible operation envelope.
+
+The goal is not intelligence or philosophy.
+
+The goal is to make it impossible to start work without an operation envelope.
+
+The machine must be able to say:
+
+> No operation envelope. No run.
+
+Hard Constraints (Boring First)
+
+* Use Python.
+* Use SQLite.
+* Single process only.
+* Library, not service.
+* No workers.
+* No adapters.
+* No routing.
+* No LLM calls.
+* No UI.
+* No async.
+* No threads.
+* No daemon.
+* No projections.
+* No claim registry.
+* No belief promotion.
+* No convergence receipts.
+* No precommitment philosophy.
+* No semantic validation.
+
+Do not redesign the existing ledger.
+
+Source Structure
+
+Suggested files:
+
+```text
+leira/
+  dispatcher/
+    kernel.py
+    envelope.py
+    test_envelope.py
+```
+
+Adapt existing structure minimally.
+
+Create
+
+`op.yaml`
+
+Schema
+
+Minimum required structure:
+
+```yaml
+operation:
+  id:
+  objective:
+  success_criteria:
+```
+
+Optional metadata:
+
+```yaml
+metadata:
+  assumptions:
+  claims:
+  failure_distinguishability:
+```
+
+Examples
+
+Valid:
+
+```yaml
+operation:
+  id: hello
+  objective: "Build v0.1 operation envelope"
+  success_criteria:
+    - "Tests pass"
+
+metadata:
+  assumptions:
+    - "Python is installed"
+
+  claims:
+    - "The ledger exists"
+
+  failure_distinguishability:
+    stale_state:
+      notes:
+        - "Worker may hold stale state"
+```
+
+Validation Rules
+
+The kernel must treat operation envelopes as data structures, not semantic documents.
+
+The kernel must never evaluate:
+
+* whether objectives are reasonable
+* whether claims are true
+* whether assumptions are correct
+* whether failure descriptions are meaningful
+
+The kernel is only authorized to enforce:
+
+* presence of required fields
+* type consistency
+* YAML structure
+
+Required:
+
+```yaml
+operation:
+  id:
+  objective:
+  success_criteria:
+```
+
+Type Rules
+
+* id must be a string
+* objective must be a string
+* success_criteria must be a list of strings
+
+Everything else is optional.
+
+YAML
+
+Use:
+
+```python
+yaml.safe_load()
+```
+
+Do not use unsafe YAML parsing.
+
+Kernel API
+
+Implement:
+
+```python
+load_operation(path)
+validate_operation(operation)
+load_and_validate(path)
+```
+
+Return typed results instead of operational exceptions.
+
+Example:
+
+```python
+@dataclass(frozen=True)
+class ContractResult:
+    success: bool
+    error_type: str | None = None
+    message: str | None = None
+    operation_id: str | None = None
+```
+
+Do not throw normal operational exceptions for invalid envelopes.
+
+Tests
+
+Write tests for:
+
+1. Valid envelope passes.
+2. Missing id fails.
+3. Missing objective fails.
+4. Missing success_criteria fails.
+5. success_criteria must be a list.
+6. Malformed YAML fails.
+7. Metadata may be absent.
+8. Metadata contents are not interpreted.
+9. ContractResult is returned instead of normal operational exceptions.
+
+Explicitly Deferred
+
+* workers
+* adapters
+* dispatch loop
+* routing
+* quotas
+* approval tokens
+* projections
+* claim registry
+* belief promotion
+* convergence receipts
+* semantic validation
+* falsifiability evaluation
+* operation execution
+
+Definition of Done
+
+The machine can refuse to start because an operation envelope is missing or malformed.
+
+The machine cannot judge the meaning of the envelope.
+
+Remember:
+
+The implementation target is not intelligence.
+
+It is mechanical honesty.
+
+The machine should be able to say:
+
+> No envelope. No run.
+
+And nothing more.

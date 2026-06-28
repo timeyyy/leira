@@ -1,0 +1,263 @@
+# Leira v1.16 — Dispatch Record
+
+## Mission
+
+Implement the deterministic **Dispatch Record** slice.
+
+This slice records an intended dispatch action derived from a Human Decision.
+
+It does **not** execute the action.
+
+It does **not** call tools.
+
+It does **not** run prompts.
+
+It does **not** modify project state.
+
+It merely preserves:
+
+* which human decision authorized the dispatch,
+* what artifact is being dispatched,
+* where it is intended to go,
+* and what execution mode is requested.
+
+The lifecycle becomes:
+
+```text
+Prompt Revision Record
+↓
+
+Human Decision Record
+↓
+
+Dispatch Record
+```
+
+---
+
+# Architectural Review
+
+Leira now has explicit human decisions.
+
+The next boundary is handoff.
+
+A dispatcher must eventually execute work, but before execution exists, Leira needs a deterministic record of intended dispatch.
+
+This keeps execution from becoming hidden authority.
+
+The Dispatch Record says:
+
+> "A human decision authorized this intended handoff."
+
+Nothing more.
+
+---
+
+# Files
+
+Create:
+
+```text
+leira/dispatch_record/
+    __init__.py
+    dispatch.py
+    test_dispatch_record.py
+```
+
+Modify nothing else unless strictly necessary.
+
+---
+
+# Public API
+
+Create immutable dataclass:
+
+```text
+DispatchRecord
+```
+
+Fields:
+
+```text
+dispatch_id
+human_decision_id
+subject_id
+subject_kind
+dispatch_type
+target_label
+execution_mode
+reason_codes
+source_label
+dispatch_summary
+```
+
+All fields are caller supplied.
+
+No generated identifiers.
+
+No timestamps.
+
+No clocks.
+
+No UUIDs.
+
+No randomness.
+
+Unknown dispatch_type values are preserved exactly.
+
+Unknown execution_mode values are preserved exactly.
+
+---
+
+# Functions
+
+Implement:
+
+```text
+create_dispatch_record(...)
+```
+
+Returns immutable DispatchRecord.
+
+Implement:
+
+```text
+dispatch_record_markdown(...)
+```
+
+Returns deterministic markdown.
+
+Implement:
+
+```text
+write_dispatch_record(...)
+```
+
+Optional derived scratch writer.
+
+Writes:
+
+```text
+.leira/dispatch_records/<dispatch_id>.dispatch.md
+```
+
+Derived output only.
+
+---
+
+# Markdown Format
+
+Render:
+
+```text
+# Dispatch Record
+
+## Dispatch ID
+
+...
+
+## Human Decision
+
+...
+
+## Subject
+
+...
+
+## Subject Kind
+
+...
+
+## Dispatch Type
+
+...
+
+## Target
+
+...
+
+## Execution Mode
+
+...
+
+## Source
+
+...
+
+## Reason Codes
+
+...
+
+## Dispatch Summary
+
+...
+
+## Provenance Notice
+
+This record preserves an intended dispatch as evidence.
+
+It performs no execution, tool calls, prompt submission, workflow transition or project-state mutation.
+```
+
+Section order must never vary.
+
+---
+
+# Tests
+
+Verify:
+
+* immutable dataclass
+* deterministic object creation
+* deterministic markdown
+* deterministic file output
+* byte-identical repeated writes
+* dispatch_type preserved exactly
+* execution_mode preserved exactly
+* target_label preserved exactly
+* reason_codes ordering preserved exactly
+* dispatch_summary preserved exactly
+* no clocks
+* no timestamps
+* no UUIDs
+* no randomness
+* no generated identifiers
+* no tool calls
+* no subprocess
+* no dispatcher execution
+* no workflow execution
+* no planner
+* no AI calls
+* no ledger mutation
+* no project-state mutation
+
+---
+
+# Explicit Guardrails
+
+Do not implement:
+
+* actual dispatch
+* execution
+* subprocess
+* shell commands
+* prompt submission
+* AI adapters
+* browser automation
+* workflow engine
+* state machine
+* planner
+* CLI
+* ledger persistence
+* database
+* project-state mutation
+
+---
+
+# Steward's Law
+
+Keep it boring.
+
+The kernel may record that work is intended to be dispatched.
+
+The kernel must not yet perform the dispatch.

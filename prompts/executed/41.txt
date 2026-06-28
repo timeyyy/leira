@@ -1,0 +1,311 @@
+# Leira v4.1 — Dispatcher Kernel Receipt Layer
+
+## Mission
+
+Extend the deterministic Dispatcher Kernel with a receipt layer.
+
+This is **not** execution.
+
+This is **not** planning.
+
+This is **not** orchestration.
+
+This is **not** autonomy.
+
+The receipt layer records what deterministic dispatch plan artifact was produced from what committed `DispatchRecord`.
+
+It exists only for auditability and provenance.
+
+---
+
+## Context
+
+Leira v4.0 implemented:
+
+```text
+leira/dispatcher_kernel/
+    __init__.py
+    dispatcher.py
+    test_dispatcher_kernel.py
+```
+
+It provides:
+
+* immutable `DispatchPlan`
+* immutable `DispatcherKernelResult`
+* deterministic `build_dispatch_plan(...)`
+* deterministic `run_dispatcher_kernel(...)`
+* deterministic markdown rendering
+* deterministic file output to `.leira/dispatcher_kernel/<dispatch_id>.dispatch_plan.md`
+
+The v4.0 verification report passed.
+
+Treat v4.0 as complete.
+
+Do not redesign it.
+
+---
+
+## Goal
+
+When a dispatcher kernel plan is written, also produce a deterministic receipt describing the derived artifact.
+
+The receipt must be machine-readable JSON.
+
+It must record facts only.
+
+---
+
+## New Output
+
+Create receipts under:
+
+```text
+.leira/dispatcher_kernel_receipts/
+```
+
+Filename:
+
+```text
+<dispatch_id>.dispatch_plan_receipt.json
+```
+
+Example:
+
+```text
+.leira/dispatcher_kernel_receipts/DISPATCH-001.dispatch_plan_receipt.json
+```
+
+---
+
+## Receipt Fields
+
+The receipt must contain exactly:
+
+```text
+dispatch_id
+subject_id
+subject_kind
+dispatch_type
+target_label
+execution_mode
+reason_codes
+dispatch_summary
+dispatch_plan_path
+dispatch_plan_sha256
+provenance_notice
+```
+
+No timestamps.
+
+No clocks.
+
+No UUIDs.
+
+No randomness.
+
+No generated identifiers.
+
+---
+
+## New Public API
+
+Add:
+
+```text
+DispatchPlanReceipt
+```
+
+Immutable dataclass.
+
+Fields must match the receipt schema exactly.
+
+Add:
+
+```text
+build_dispatch_plan_receipt(...)
+```
+
+Inputs:
+
+```text
+DispatcherKernelResult
+dispatch_plan_path
+dispatch_plan_sha256
+```
+
+Returns:
+
+```text
+DispatchPlanReceipt
+```
+
+Pure field extraction only.
+
+---
+
+Add:
+
+```text
+dispatch_plan_receipt_json(...)
+```
+
+Returns deterministic JSON string.
+
+Requirements:
+
+* stable key ordering
+* stable indentation
+* trailing newline
+* no nondeterministic fields
+
+---
+
+Add:
+
+```text
+write_dispatcher_kernel_receipt(...)
+```
+
+Writes:
+
+```text
+.leira/dispatcher_kernel_receipts/<dispatch_id>.dispatch_plan_receipt.json
+```
+
+Derived output only.
+
+---
+
+## Integration
+
+Do not change `run_dispatcher_kernel(...)`.
+
+Do not change `build_dispatch_plan(...)`.
+
+Do not change `dispatcher_kernel_markdown(...)` except if strictly necessary for shared constants.
+
+You may update `write_dispatcher_kernel(...)` only if needed to expose or reuse the written markdown path.
+
+Prefer keeping receipt writing as an explicit separate function rather than automatic hidden behavior.
+
+---
+
+## Hashing
+
+The receipt must include the SHA-256 hash of the dispatch plan markdown bytes.
+
+Hash the exact bytes written to:
+
+```text
+.leira/dispatcher_kernel/<dispatch_id>.dispatch_plan.md
+```
+
+---
+
+## Determinism Requirements
+
+For the same `DispatcherKernelResult` and written dispatch plan artifact:
+
+```text
+same receipt dataclass
+same receipt JSON
+same receipt file path
+same receipt file bytes
+```
+
+No hidden state.
+
+No repository scanning.
+
+No filesystem inspection beyond the explicit dispatch plan file and explicit receipt write target.
+
+---
+
+## Tests
+
+Create or extend pytest coverage for:
+
+* immutable `DispatchPlanReceipt`
+* exact receipt fields
+* deterministic receipt creation
+* deterministic JSON rendering
+* byte-identical repeated receipt writes
+* SHA-256 matches written dispatch plan bytes
+* receipt path is deterministic
+* receipt JSON has stable ordering
+* dispatcher kernel remains non-executing
+* no subprocess
+* no shell commands
+* no worker invocation
+* no scheduler
+* no AI calls
+* no browser automation
+* no clocks
+* no timestamps
+* no UUIDs
+* no randomness
+* no repository scanning
+* no ledger access
+
+Run:
+
+```bash
+pytest leira/dispatcher_kernel/test_dispatcher_kernel.py
+```
+
+Also run the full test suite if practical.
+
+---
+
+## Explicit Guardrails
+
+Do not implement:
+
+* execution
+* dispatch
+* worker invocation
+* scheduling
+* orchestration
+* planner logic
+* AI adapters
+* browser automation
+* CLI
+* repository scanning
+* ledger reading
+* database access
+* policy loading
+* timestamps
+* UUIDs
+* randomness
+
+---
+
+## Deliverables
+
+1. Updated dispatcher kernel implementation
+2. Updated public exports
+3. Updated tests
+4. Verification output
+5. Summary including:
+
+   * files changed
+   * tests executed
+   * example receipt JSON
+   * recommended next smallest commit
+
+Recommended commit message:
+
+```text
+Add dispatcher kernel receipt layer
+```
+
+## Steward's Law
+
+Keep it boring.
+
+The Dispatcher Kernel may describe what would be dispatched.
+
+The receipt layer may describe what the Dispatcher Kernel produced.
+
+Neither may dispatch.

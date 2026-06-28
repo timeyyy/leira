@@ -217,3 +217,147 @@ def write_execution_adapter_contract(
     content = execution_adapter_contract_markdown(result)
     output.write_text(content, encoding="utf-8")
     return output.relative_to(root).as_posix()
+
+
+@dataclass(frozen=True)
+class ExecutionCompatibilityResult:
+    dispatch_plan: DispatchPlan
+    execution_capability: ExecutionCapability
+    compatible: bool
+    reason_codes: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.dispatch_plan, DispatchPlan):
+            raise TypeError("dispatch_plan must be a DispatchPlan instance")
+        if not isinstance(self.execution_capability, ExecutionCapability):
+            raise TypeError("execution_capability must be an ExecutionCapability instance")
+        if not isinstance(self.compatible, bool):
+            raise TypeError("compatible must be a boolean")
+        if not isinstance(self.reason_codes, tuple):
+            raise TypeError("reason_codes must be a tuple")
+        for item in self.reason_codes:
+            if not isinstance(item, str):
+                raise TypeError("Elements of reason_codes must be strings")
+            if not item or not item.strip():
+                raise ValueError("Elements of reason_codes cannot be empty or whitespace-only")
+
+
+def check_execution_compatibility(
+    dispatch_plan: DispatchPlan,
+    execution_capability: ExecutionCapability,
+) -> ExecutionCompatibilityResult:
+    """Check compatibility between a DispatchPlan and an ExecutionCapability."""
+    if not isinstance(dispatch_plan, DispatchPlan):
+        raise TypeError("dispatch_plan must be a DispatchPlan instance")
+    if not isinstance(execution_capability, ExecutionCapability):
+        raise TypeError("execution_capability must be an ExecutionCapability instance")
+
+    reasons: list[str] = []
+
+    if dispatch_plan.dispatch_type not in execution_capability.supported_dispatch_types:
+        reasons.append("unsupported_dispatch_type")
+
+    if dispatch_plan.subject_kind not in execution_capability.supported_subject_kinds:
+        reasons.append("unsupported_subject_kind")
+
+    if dispatch_plan.execution_mode not in execution_capability.supported_execution_modes:
+        reasons.append("unsupported_execution_mode")
+
+    if dispatch_plan.target_label != execution_capability.adapter_label:
+        reasons.append("target_label_mismatch")
+
+    if not reasons:
+        compatible = True
+        reason_codes = ("compatible",)
+    else:
+        compatible = False
+        reason_codes = tuple(reasons)
+
+    return ExecutionCompatibilityResult(
+        dispatch_plan=dispatch_plan,
+        execution_capability=execution_capability,
+        compatible=compatible,
+        reason_codes=reason_codes,
+    )
+
+
+def execution_compatibility_markdown(result: ExecutionCompatibilityResult) -> str:
+    """Render execution adapter compatibility result as deterministic markdown."""
+    if not isinstance(result, ExecutionCompatibilityResult):
+        raise TypeError("result must be an ExecutionCompatibilityResult instance")
+
+    lines = [
+        "# Execution Compatibility Check",
+        "",
+        "## Dispatch Plan",
+        "",
+        "```text",
+        dispatch_plan_markdown(result.dispatch_plan),
+        "```",
+        "",
+        "## Execution Capability",
+        "",
+    ]
+
+    cap = result.execution_capability
+    cap_lines = [
+        f"* Adapter Label: {cap.adapter_label}",
+        f"* Adapter Kind: {cap.adapter_kind}",
+        "* Supported Dispatch Types:",
+    ]
+    for dt in cap.supported_dispatch_types:
+        cap_lines.append(f"  * {dt}")
+    cap_lines.append("* Supported Subject Kinds:")
+    for sk in cap.supported_subject_kinds:
+        cap_lines.append(f"  * {sk}")
+    cap_lines.append("* Supported Execution Modes:")
+    for em in cap.supported_execution_modes:
+        cap_lines.append(f"  * {em}")
+    cap_lines.extend([
+        f"* Supports Parallel Execution: {cap.supports_parallel_execution}",
+        f"* Supports Dry Run: {cap.supports_dry_run}",
+        f"* Supports Interactive Execution: {cap.supports_interactive_execution}",
+        "",
+    ])
+    lines.extend(cap_lines)
+
+    lines.extend([
+        "## Compatibility Result",
+        "",
+        f"* Compatible: {result.compatible}",
+        "* Reason Codes:",
+    ])
+    for code in result.reason_codes:
+        lines.append(f"  * {code}")
+
+    lines.extend([
+        "",
+        "## Provenance Notice",
+        "",
+        "> This compatibility check validates declared adapter compatibility only. It performs no execution, scheduling, planning, orchestration, approval, or dispatch.",
+        "",
+    ])
+
+    return "\n".join(lines)
+
+
+def write_execution_compatibility(
+    result: ExecutionCompatibilityResult,
+    repo_root: str | Path = ".",
+) -> str:
+    """Write deterministic derived execution compatibility markdown."""
+    if not isinstance(result, ExecutionCompatibilityResult):
+        raise TypeError("result must be an ExecutionCompatibilityResult instance")
+
+    root = Path(repo_root)
+    output = (
+        root
+        / ".leira"
+        / "execution_adapter_compatibility"
+        / f"{result.dispatch_plan.dispatch_id}.{result.execution_capability.adapter_label}.compatibility.md"
+    )
+    output.parent.mkdir(parents=True, exist_ok=True)
+    content = execution_compatibility_markdown(result)
+    output.write_text(content, encoding="utf-8")
+    return output.relative_to(root).as_posix()
+

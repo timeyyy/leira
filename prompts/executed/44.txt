@@ -1,0 +1,386 @@
+# Leira v4.4 — Execution Adapter Selection Kernel
+
+## Mission
+
+Implement the deterministic **Execution Adapter Selection Kernel**.
+
+This kernel is responsible for selecting which declared execution adapters are compatible with a `DispatchPlan`.
+
+It is **not** an execution engine.
+
+It is **not** orchestration.
+
+It is **not** scheduling.
+
+It is **not** planning.
+
+It is **not** a worker manager.
+
+It performs no execution.
+
+It merely computes the deterministic set of compatible adapters.
+
+---
+
+# Context
+
+The following deterministic layers already exist:
+
+* Dispatch Draft
+* Dispatch Commit
+* Dispatcher Kernel
+* Dispatcher Kernel Receipt Layer
+* Execution Adapter Contract
+* Execution Adapter Compatibility Check
+
+Treat these as complete.
+
+Do not redesign them.
+
+---
+
+# Architecture
+
+Current deterministic pipeline:
+
+```text
+DispatchRecord
+      │
+      ▼
+Dispatcher Kernel
+      │
+      ▼
+DispatchPlan
+      │
+      ▼
+Execution Adapter Contract
+      │
+      ▼
+Compatibility Check
+```
+
+This prompt introduces:
+
+```text
+Compatibility Results
+      │
+      ▼
+Execution Adapter Selection Kernel
+```
+
+Execution remains outside Leira.
+
+---
+
+# Files
+
+Create:
+
+```text
+leira/execution_adapter_selection/
+    __init__.py
+    selection.py
+    test_execution_adapter_selection.py
+```
+
+Modify nothing else unless strictly necessary.
+
+---
+
+# Public API
+
+Create immutable dataclasses.
+
+---
+
+## AdapterSelection
+
+Fields:
+
+```text
+dispatch_plan
+compatible_adapters
+incompatible_adapters
+selection_reason
+```
+
+Where:
+
+* `compatible_adapters` is a tuple of `ExecutionCapability`
+* `incompatible_adapters` is a tuple of `ExecutionCapability`
+* `selection_reason` is a tuple of strings
+
+---
+
+## AdapterSelectionResult
+
+Fields:
+
+```text
+dispatch_plan
+adapter_selection
+```
+
+---
+
+# Functions
+
+Implement:
+
+```text
+select_execution_adapters(...)
+```
+
+Inputs:
+
+```text
+DispatchPlan
+tuple[ExecutionCapability, ...]
+```
+
+Returns:
+
+```text
+AdapterSelection
+```
+
+For each capability:
+
+* evaluate compatibility using the existing compatibility layer
+* compatible adapters go into `compatible_adapters`
+* incompatible adapters go into `incompatible_adapters`
+
+The ordering of adapters must always preserve the caller's supplied order.
+
+No sorting.
+
+No scoring.
+
+No preference.
+
+No ranking.
+
+No heuristics.
+
+No tie-breaking.
+
+---
+
+Implement:
+
+```text
+build_adapter_selection_result(...)
+```
+
+Returns:
+
+```text
+AdapterSelectionResult
+```
+
+Pure aggregation only.
+
+---
+
+Implement:
+
+```text
+adapter_selection_markdown(...)
+```
+
+Top-level sections:
+
+```text
+# Execution Adapter Selection
+
+## Dispatch Plan
+
+## Compatible Adapters
+
+## Incompatible Adapters
+
+## Provenance Notice
+```
+
+---
+
+Implement:
+
+```text
+write_adapter_selection(...)
+```
+
+Writes:
+
+```text
+.leira/execution_adapter_selection/<dispatch_id>.selection.md
+```
+
+Derived output only.
+
+---
+
+# Selection Rules
+
+Selection consists only of partitioning.
+
+If three adapters are compatible:
+
+```text
+compatible_adapters = (A, B, C)
+```
+
+If two are incompatible:
+
+```text
+incompatible_adapters = (D, E)
+```
+
+Nothing else.
+
+Do not choose "the best."
+
+Do not reorder.
+
+Do not rank.
+
+Do not score.
+
+Do not infer.
+
+The caller decides what to do next.
+
+---
+
+# Determinism Requirements
+
+For identical:
+
+```text
+DispatchPlan
+
+ExecutionCapability tuple
+```
+
+must produce identical:
+
+```text
+AdapterSelection
+
+AdapterSelectionResult
+
+markdown
+
+file bytes
+```
+
+No hidden state.
+
+No filesystem inspection.
+
+No repository scanning.
+
+No clocks.
+
+No timestamps.
+
+No UUIDs.
+
+No randomness.
+
+---
+
+# Tests
+
+Create comprehensive pytest coverage verifying:
+
+* immutable dataclasses
+* deterministic partitioning
+* caller ordering preserved
+* compatible adapters preserved
+* incompatible adapters preserved
+* deterministic markdown
+* deterministic file output
+* byte-identical repeated rendering
+* byte-identical repeated writes
+* empty adapter list
+* all compatible
+* all incompatible
+* mixed compatibility
+* no execution
+* no scheduling
+* no orchestration
+* no planner
+* no worker invocation
+* no subprocess
+* no shell commands
+* no AI calls
+* no browser automation
+* no networking
+* no repository scanning
+* no clocks
+* no timestamps
+* no UUIDs
+* no randomness
+
+Run the dedicated test suite and repository-wide suite if practical.
+
+---
+
+# Explicit Guardrails
+
+Do not implement:
+
+* execution
+* scheduling
+* orchestration
+* retries
+* queueing
+* adapter ranking
+* adapter scoring
+* heuristics
+* planner logic
+* AI calls
+* browser automation
+* networking
+* repository loading
+* databases
+* policy loading
+* project-state mutation
+
+Selection is partitioning only.
+
+---
+
+# Deliverables
+
+Provide:
+
+1. Files changed
+2. Test commands executed
+3. Test results
+4. Example selection markdown
+5. Example compatible/incompatible partition
+6. Recommended smallest next commit
+
+Suggested commit message:
+
+```text
+Add deterministic execution adapter selection kernel
+```
+
+---
+
+# Steward's Law
+
+Keep it boring.
+
+The Dispatcher Kernel determines what would be dispatched.
+
+The Execution Adapter Contract describes what an adapter claims it can accept.
+
+The Compatibility Layer determines whether a dispatch plan matches that claim.
+
+The Selection Kernel partitions adapters into compatible and incompatible sets.
+
+None of these layers may execute anything.

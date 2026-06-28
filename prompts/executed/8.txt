@@ -1,0 +1,386 @@
+Implement Leira v0.7: Projection Engine
+
+Mission
+
+Extend Leira from a ledger with history into a ledger with disposable views.
+
+The goal is not optimization.
+
+The goal is not caching.
+
+The goal is to prove that current state can always be reconstructed from history.
+
+The machine must be able to say:
+
+> History is authoritative.
+>
+> Projections are convenience.
+>
+> Projections may be destroyed.
+>
+> Truth survives.
+
+Nothing more.
+
+Hard Constraints
+
+* Python only.
+* SQLite only.
+* Single process only.
+* Blocking only.
+* Library, not service.
+* No threads.
+* No async.
+* No daemon.
+* No routing.
+* No retries.
+* No scheduler.
+* No quotas.
+* No memory.
+* No background tasks.
+* No LLM calls.
+* No agent loops.
+
+Do not redesign:
+
+* ledger
+* envelope
+* lifecycle
+* shell adapter
+* git adapter
+* worker protocol
+
+Adapt existing structure minimally.
+
+Files
+
+```text
+leira/
+  projection/
+    state.py
+    rebuild.py
+    test_projection.py
+```
+
+Mission
+
+Projections are caches.
+
+History is truth.
+
+Projections are disposable.
+
+Projection loss is recoverable.
+
+Ledger loss is not.
+
+Projection Schema
+
+Implement:
+
+```python
+operation_state_projection
+```
+
+Fields:
+
+```python
+run_id
+current_state
+last_event_id
+updated_at
+```
+
+One row per operation.
+
+Rules
+
+Every field in the projection must be derivable from the ledger.
+
+No hidden metadata.
+
+No extra flags.
+
+No inferred meaning.
+
+No timestamps generated during rebuild.
+
+`updated_at` must come from the corresponding ledger event timestamp.
+
+Projection API
+
+Implement:
+
+```python
+get_current_state(
+    run_id: str
+) -> str | None
+```
+
+Implement:
+
+```python
+rebuild_projection()
+```
+
+which reconstructs the projection table entirely from the ledger.
+
+Kernel Rules
+
+The kernel does not trust projections.
+
+The kernel trusts history.
+
+Projection disagreement is resolved in favor of the ledger.
+
+Projection corruption is recoverable.
+
+Ledger corruption is not.
+
+Projection Updates
+
+Whenever a lifecycle event is appended:
+
+```text
+state_created
+state_running
+artifact_written
+state_completed
+```
+
+update the projection.
+
+Projection updates are convenience.
+
+Ledger appends are truth.
+
+Projection update failure must never invalidate a successful ledger append.
+
+Failure Model
+
+If projection update fails:
+
+* ledger append succeeds
+* operation history survives
+* rebuild_projection() repairs projection corruption
+
+Projection failure is recoverable.
+
+Ledger corruption is not.
+
+Projection Lifecycle
+
+The projection contains only:
+
+```python
+current_state
+last_event_id
+updated_at
+```
+
+derived from the most recent lifecycle event.
+
+Do not create a second state machine.
+
+History already defines state.
+
+Projection Rebuild
+
+Implement:
+
+```python
+rebuild_projection()
+```
+
+Algorithm
+
+Begin a transaction.
+
+Clear:
+
+```python
+operation_state_projection
+```
+
+Read ledger events chronologically.
+
+Process each event sequentially.
+
+For each event:
+
+* derive current_state
+* derive last_event_id
+* derive updated_at from the ledger event timestamp
+
+Insert or update the projection row.
+
+Commit transaction.
+
+Rebuild must be all-or-nothing.
+
+A partially rebuilt projection is corruption.
+
+Idempotence
+
+Running:
+
+```python
+rebuild_projection()
+```
+
+multiple times must produce identical results.
+
+No duplicate rows.
+
+No ghost state.
+
+No timestamps generated during rebuild.
+
+Identity lives in history.
+
+Representation lives in projections.
+
+Lost Run Rule
+
+A run with no events has no projection.
+
+If:
+
+```python
+get_current_state(run_id)
+```
+
+is called for an unknown run:
+
+return:
+
+```python
+None
+```
+
+The first event creates the projection.
+
+Projection Deletion
+
+Deleting:
+
+```python
+operation_state_projection
+```
+
+must not lose truth.
+
+Rebuilding must fully restore the view.
+
+Event Replay Test
+
+Append multiple lifecycle events.
+
+Capture:
+
+```python
+get_current_state()
+```
+
+Delete the projection table.
+
+Verify:
+
+```python
+get_current_state()
+```
+
+returns:
+
+```python
+None
+```
+
+Run:
+
+```python
+rebuild_projection()
+```
+
+Verify:
+
+```python
+get_current_state()
+```
+
+returns the exact same state as before deletion.
+
+Tests
+
+Required tests
+
+1. projection reflects state_created.
+2. projection reflects state_running.
+3. projection reflects artifact_written.
+4. projection reflects state_completed.
+5. multiple operations coexist.
+6. current state equals most recent event.
+7. last_event_id derived from ledger.
+8. updated_at comes from ledger timestamp.
+9. projection contains no hidden state.
+10. deleting projection loses no truth.
+11. rebuild restores deleted projections.
+12. rebuild reproduces previous state exactly.
+13. rebuild is idempotent.
+14. projection corruption is recoverable.
+15. projection disagreement favors ledger.
+16. validate_chain() still succeeds.
+17. unknown run returns None.
+18. run with first event creates projection.
+19. rebuild uses a transaction.
+20. partial rebuilds are impossible.
+21. event replay test succeeds.
+
+Explicitly Deferred
+
+* materialized views
+* indexing optimization
+* caching layers
+* query planner
+* search
+* analytics
+* dashboards
+* subscriptions
+* streaming
+* pubsub
+* notifications
+* summaries
+* LLM projections
+* agent loops
+
+Definition of Done
+
+Leira can lose every projection and recover.
+
+History remains truth.
+
+Current state is convenience.
+
+Identity lives in the ledger.
+
+Representation lives in projections.
+
+The machine can forget its views
+
+without forgetting reality.
+
+Remember:
+
+Workers think.
+
+Kernel gates.
+
+Ledger remembers.
+
+Projections serve.
+
+Auditors verify.
+
+Truth lives in history.
+
+Everything else is disposable.

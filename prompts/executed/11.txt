@@ -1,0 +1,560 @@
+Implement Leira v1.0: Single Dispatcher
+
+Mission
+
+Extend Leira from a machine that accepts work into a machine that can perform one piece of work.
+
+The goal is not orchestration.
+
+The goal is not routing.
+
+The goal is not autonomy.
+
+The goal is to prove that one pending intent can be explicitly claimed, executed by one supplied worker, and recorded honestly.
+
+The machine must be able to say:
+
+> An intent existed.
+>
+> One worker claimed it.
+>
+> One worker ran.
+>
+> Here is what happened.
+>
+> Execution finished or failed.
+>
+> No hidden routing occurred.
+
+Nothing more.
+
+Hard Constraints
+
+* Python only.
+* SQLite only.
+* Single process only.
+* Blocking only.
+* Library, not service.
+* No threads.
+* No async.
+* No daemon.
+* No loops inside dispatch_once.
+* No routing.
+* No retries.
+* No scheduler.
+* No priorities.
+* No worker registry yet.
+* No memory.
+* No background tasks.
+* No agent loops.
+* No LLM calls.
+* No parallel execution.
+
+Do not redesign:
+
+* ledger
+* lifecycle
+* shell adapter
+* git adapter
+* worker protocol
+* projection engine
+* auditor
+* inbox
+
+Adapt existing structure minimally.
+
+Files
+
+```text
+leira/
+  dispatcher/
+    dispatcher.py
+    test_dispatcher.py
+```
+
+Architecture
+
+```text
+Inbox
+ ↓
+Dispatcher
+ ↓
+Worker
+ ↓
+Ledger
+ ↓
+Projection
+```
+
+The dispatcher is a mechanical actuator.
+
+Not a broker.
+
+Not a router.
+
+Not a scheduler.
+
+The caller supplies both:
+
+```python
+intent_id
+worker
+```
+
+explicitly.
+
+No hidden lookup.
+
+No automatic choice.
+
+Worker Protocol Update
+
+Extend the Worker protocol to include a stable name:
+
+```python
+class Worker(Protocol):
+    name: str
+
+    def invoke(
+        self,
+        inputs: dict
+    ) -> WorkerResult:
+        ...
+```
+
+Rules:
+
+* worker.name must be a non-empty string.
+* worker.name is recorded in ledger artifacts.
+* worker.name is not used for routing.
+* worker.name is only provenance metadata.
+
+Execution States
+
+Intent execution statuses:
+
+```text
+PENDING
+RUNNING
+COMPLETED
+FAILED
+```
+
+Terminal states:
+
+```text
+COMPLETED
+FAILED
+```
+
+Terminal states are immutable.
+
+Once an intent reaches a terminal state, it must not be dispatched again.
+
+Dispatch API
+
+Implement:
+
+```python
+dispatch_once(
+    intent_id: str,
+    worker: Worker
+) -> DispatchResult
+```
+
+Typed Result
+
+```python
+@dataclass(frozen=True)
+class DispatchResult:
+    success: bool
+    intent_id: str
+    worker_name: str | None = None
+    status: str | None = None
+    error_type: str | None = None
+```
+
+Claim Rules
+
+Only:
+
+```text
+PENDING
+```
+
+intents may be claimed.
+
+Dispatching an intent with status:
+
+```text
+RUNNING
+COMPLETED
+FAILED
+```
+
+must return:
+
+```python
+DispatchResult(
+    success=False,
+    intent_id=intent_id,
+    error_type="INVALID_STATUS"
+)
+```
+
+Unknown intent returns:
+
+```python
+error_type="UNKNOWN_INTENT"
+```
+
+Invalid worker name returns:
+
+```python
+error_type="INVALID_WORKER"
+```
+
+No double execution.
+
+No duplicate claims.
+
+No terminal mutation.
+
+Dispatch Sequence
+
+Keep implementation flat.
+
+No internal dispatch loop.
+
+If a caller wants to dispatch 100 intents, the caller must call:
+
+```python
+dispatch_once(...)
+```
+
+100 times.
+
+Sequence:
+
+1. Read intent status.
+
+2. Verify status is:
+
+```text
+PENDING
+```
+
+3. Read intent payload.
+
+4. Validate worker.name.
+
+5. Append:
+
+```text
+intent_claimed
+```
+
+with status:
+
+```text
+RUNNING
+```
+
+and worker_name.
+
+6. Append:
+
+```text
+state_running
+```
+
+7. Invoke worker once with the intent payload as inputs.
+
+8. Convert worker result or exception into WorkerResult.
+
+9. Append:
+
+```text
+artifact_written
+```
+
+with worker_result artifact.
+
+10. If:
+
+```python
+worker_result.success is True
+```
+
+append:
+
+```text
+intent_completed
+```
+
+with status:
+
+```text
+COMPLETED
+```
+
+else append:
+
+```text
+intent_failed
+```
+
+with status:
+
+```text
+FAILED
+```
+
+Worker failure is not dispatcher failure.
+
+Worker exception is not dispatcher failure.
+
+Ledger append failure is dispatcher failure.
+
+Artifact Schema
+
+Reuse existing worker_result shape, extended with intent provenance:
+
+```python
+{
+    "type": "worker_result",
+    "content": {
+        "intent_id": "...",
+        "worker_name": "...",
+        "inputs": {...},
+        "outputs": {...},
+        "worker_success": True,
+        "error_type": None,
+        "error_message": ""
+    }
+}
+```
+
+Worker Exception Handling
+
+If worker.invoke raises:
+
+```python
+WorkerResult(
+    success=False,
+    outputs={},
+    error_type="UNEXPECTED",
+    error_message="..."
+)
+```
+
+Then record artifact and mark intent:
+
+```text
+FAILED
+```
+
+Terminal Enforcement
+
+Projection rebuild must respect terminal state immutability.
+
+If ledger contains events after:
+
+```text
+intent_completed
+intent_failed
+```
+
+that attempt to transition the same intent again, audit must report:
+
+```text
+ILLEGAL_TRANSITION
+```
+
+Rebuild must not silently make terminal states mutable.
+
+If invalid transition events already exist in history:
+
+* do not repair them
+* do not delete them
+* audit reports them
+* projection should preserve the last legal terminal state
+
+Kernel Rules
+
+The dispatcher does not:
+
+* route
+* choose workers
+* retry
+* inspect outputs
+* evaluate quality
+* schedule
+* loop over intents
+* search for work
+
+The dispatcher only:
+
+* checks status
+* claims intent
+* invokes supplied worker once
+* records result
+* records terminal status
+
+Projection
+
+Extend:
+
+```text
+intent_projection
+```
+
+Fields:
+
+```python
+intent_id
+status
+worker_name
+updated_at
+last_event_id
+```
+
+All fields must be derived from ledger events.
+
+`updated_at` must come from ledger event created_at.
+
+No datetime.now() during rebuild.
+
+Audit Extension
+
+Extend audit to verify:
+
+* only PENDING intents can be claimed
+* RUNNING intents have claim events
+* COMPLETED intents have completion events
+* FAILED intents have failure events
+* worker_name matches claim/result events
+* no duplicate claim events
+* terminal states are immutable
+* no transition occurs after COMPLETED or FAILED
+* projection preserves last legal terminal state
+* dispatcher contains no routing logic
+
+Audit remains read-only.
+
+Failure Model
+
+Worker failure:
+
+```text
+intent_failed
+```
+
+Dispatcher survives.
+
+Worker exception:
+
+```text
+UNEXPECTED
+intent_failed
+```
+
+Dispatcher survives.
+
+Ledger append failure:
+
+dispatcher failure.
+
+Projection failure:
+
+recoverable.
+
+Tests
+
+Required tests
+
+1. pending intent dispatches successfully.
+2. unknown intent returns UNKNOWN_INTENT.
+3. running intent rejected.
+4. completed intent rejected.
+5. failed intent rejected.
+6. invalid worker name rejected.
+7. worker success produces COMPLETED.
+8. worker failure produces FAILED.
+9. worker exception becomes UNEXPECTED and FAILED.
+10. intent_claimed event recorded.
+11. state_running event recorded.
+12. artifact_written event recorded.
+13. intent_completed event recorded on success.
+14. intent_failed event recorded on failure.
+15. worker_name preserved.
+16. worker_name is provenance only, not routing.
+17. double dispatch prevented.
+18. terminal states immutable.
+19. projection rebuilt successfully.
+20. projection uses ledger timestamps.
+21. projection preserves last legal terminal state.
+22. audit detects duplicate claims.
+23. audit detects transition after terminal state.
+24. audit validates execution history.
+25. dispatch_once contains no internal loop.
+26. caller must dispatch 100 intents by calling dispatch_once 100 times.
+27. 100 sequential dispatch calls pass.
+28. validate_chain() still succeeds.
+29. typed failures preferred over exceptions.
+30. dispatcher contains no routing logic.
+
+Explicitly Deferred
+
+* queues
+* scheduling
+* retries
+* priorities
+* worker registry
+* routing
+* worker lookup
+* load balancing
+* memory
+* OpenAI
+* Claude
+* Gemini
+* MCP
+* agent loops
+* parallel execution
+* automatic claiming
+
+Definition of Done
+
+Leira can execute one pending intent with one explicitly supplied worker and preserve what happened.
+
+Intent and execution are separate.
+
+Worker identity is recorded as provenance.
+
+Worker failure is not dispatcher failure.
+
+Terminal states are immutable.
+
+History remains authoritative.
+
+Remember:
+
+Workers think.
+
+Kernel gates.
+
+Ledger remembers.
+
+Projections serve.
+
+Auditors verify.
+
+Intent enters.
+
+Dispatch happens once.
+
+Execution completes.
+
+The workshop should learn to perform one piece of work
+
+before it learns how to coordinate many.

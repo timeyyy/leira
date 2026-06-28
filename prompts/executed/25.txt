@@ -1,0 +1,571 @@
+Implement Leira v2.5: Proposal Approval
+
+Mission
+
+Extend Leira from a machine that records suggestions into a machine that records explicit approval decisions.
+
+The goal is not automatic execution.
+
+The goal is not planning.
+
+The goal is not agents.
+
+The goal is to prove that suggestions and authority are separate ledger events, and that approval never becomes action by itself.
+
+The machine must be able to say:
+
+> A mind proposed work.
+>
+> A human or external caller approved or rejected it.
+>
+> That decision was recorded.
+>
+> No inbox entry was created automatically.
+>
+> No claim was acquired.
+>
+> No worker was dispatched.
+
+Nothing more.
+
+Hard Constraints
+
+* Python only.
+* SQLite only.
+* Single process only.
+* Blocking only.
+* Library, not service.
+* No threads.
+* No async.
+* No daemon.
+* No retries.
+* No planning.
+* No routing.
+* No orchestration.
+* No automatic promotion.
+* No inbox submission.
+* No dispatch access.
+* No claim acquisition.
+* No shell execution.
+* No agent loops.
+* No proposal-to-inbox bridge.
+
+Do not redesign:
+
+* inbox
+* dispatcher
+* claims
+* worker protocol
+* Mind protocol
+* MindWorker
+* proposals
+* receipts
+* workspace
+* provenance
+* environment
+* archive
+* auditor
+
+Adapt existing structure minimally.
+
+Files
+
+```text
+leira/
+  proposals/
+    approval.py
+    test_approval.py
+```
+
+Mission
+
+Minds suggest.
+
+Humans or callers approve.
+
+The workshop only acts through normal inbox submission.
+
+Nothing more.
+
+Approval Status
+
+Define:
+
+```python
+class ProposalStatus(Enum):
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+```
+
+Proposal Decision
+
+Implement:
+
+```python
+@dataclass(frozen=True)
+class ProposalDecision:
+    proposal_id: str
+    status: ProposalStatus
+    decided_by: str
+    reason: str
+    decided_at: str
+```
+
+API
+
+Implement:
+
+```python
+approve_proposal(
+    proposal_id: str,
+    decided_by: str,
+    reason: str = ""
+) -> ProposalDecisionResult
+```
+
+Implement:
+
+```python
+reject_proposal(
+    proposal_id: str,
+    decided_by: str,
+    reason: str = ""
+) -> ProposalDecisionResult
+```
+
+Implement:
+
+```python
+get_decision(
+    proposal_id: str
+) -> ProposalDecision | None
+```
+
+Typed Result
+
+```python
+@dataclass(frozen=True)
+class ProposalDecisionResult:
+    success: bool
+    proposal_id: str | None
+    status: ProposalStatus | None = None
+    error_type: str | None = None
+```
+
+Rules
+
+A proposal may be decided once.
+
+Terminal states:
+
+```text
+APPROVED
+REJECTED
+```
+
+Repeated decisions are rejected.
+
+Approval is evidence.
+
+Rejection is evidence.
+
+Neither is action.
+
+Suggested errors:
+
+```text
+UNKNOWN_PROPOSAL
+ALREADY_DECIDED
+INVALID_DECIDER
+STORAGE_FAILURE
+```
+
+Decision Events
+
+Successful approval appends:
+
+```text
+proposal_approved
+```
+
+Successful rejection appends:
+
+```text
+proposal_rejected_by_user
+```
+
+Rejected re-decision appends:
+
+```text
+proposal_decision_rejected
+```
+
+Artifact Schema
+
+Approval artifact:
+
+```python
+{
+    "type": "proposal_decision",
+    "content": {
+        "proposal_id": "...",
+        "status": "APPROVED",
+        "decided_by": "...",
+        "reason": "",
+        "error_type": None
+    }
+}
+```
+
+Rejection artifact:
+
+```python
+{
+    "type": "proposal_decision",
+    "content": {
+        "proposal_id": "...",
+        "status": "REJECTED",
+        "decided_by": "...",
+        "reason": "...",
+        "error_type": None
+    }
+}
+```
+
+Rejected decision artifact:
+
+```python
+{
+    "type": "proposal_decision",
+    "content": {
+        "proposal_id": "...",
+        "status": None,
+        "decided_by": "...",
+        "reason": "...",
+        "error_type": "ALREADY_DECIDED"
+    }
+}
+```
+
+Decision Store Boundary
+
+`approve_proposal` and `reject_proposal` must only:
+
+1. validate proposal exists
+2. validate proposal is undecided
+3. validate decided_by
+4. append decision event
+5. update decision projection
+6. stop
+
+They must not call:
+
+```python
+submit_intent(...)
+claim_intent(...)
+dispatch_once(...)
+dispatch_and_track(...)
+run_command(...)
+```
+
+No shortcut path exists.
+
+Kernel Rules
+
+The kernel does not:
+
+* submit inbox intents
+* acquire claims
+* dispatch workers
+* interpret reasons
+* inspect proposal meaning
+* execute approved proposals
+* reject proposals semantically
+* promote proposals
+
+It records decisions.
+
+Nothing more.
+
+Important Boundary
+
+Approval does NOT create:
+
+```text
+intent_submitted
+intent_claimed
+state_running
+artifact_written
+```
+
+Approval is not execution.
+
+Approval is not submission.
+
+Approval is not dispatch.
+
+Caller Responsibility
+
+If a caller wants to execute approved work:
+
+1. inspect proposal
+2. explicitly call submit_intent(...)
+3. follow normal claim and dispatch lifecycle
+
+The manual bridge is outside v2.5.
+
+Projection
+
+Create:
+
+```text
+proposal_decision_projection
+```
+
+Fields:
+
+```python
+proposal_id
+status
+decided_by
+reason
+decided_at
+last_event_id
+```
+
+Projection is derived.
+
+decided_at comes from ledger event timestamp.
+
+Never use:
+
+```python
+datetime.now()
+```
+
+during rebuild.
+
+Projection Rebuild
+
+Scan:
+
+```text
+proposal_approved
+proposal_rejected_by_user
+proposal_decision_rejected
+```
+
+Rules:
+
+* proposal_approved sets terminal status APPROVED.
+* proposal_rejected_by_user sets terminal status REJECTED.
+* proposal_decision_rejected records rejection history but does not change terminal decision.
+* terminal decision must remain immutable.
+
+Rebuild must be:
+
+* deterministic
+* idempotent
+* transactional
+
+Audit Extension
+
+Verify:
+
+* decisions match ledger
+* proposal ids exist
+* decisions are terminal
+* duplicate decisions are preserved as rejection history
+* decision projection matches ledger
+* decided_at equals ledger event timestamp
+* approved proposals did not automatically become inbox entries
+* approved proposals did not automatically acquire claims
+* approved proposals did not automatically dispatch
+* proposal approval module does not import dispatcher, claims, shell, or inbox submission path
+
+Audit remains read-only.
+
+Audit reports disagreement.
+
+It does not repair.
+
+Negative Execution Check
+
+If the auditor finds:
+
+```text
+proposal_approved
+```
+
+with no later:
+
+```text
+intent_submitted
+```
+
+that is valid.
+
+Approval alone is intended to do nothing.
+
+If a later:
+
+```text
+intent_submitted
+```
+
+exists, it must be a normal explicit inbox event.
+
+Do not infer automatic causality.
+
+Do not create hidden proposal-to-intent links in v2.5.
+
+Failure Model
+
+Unknown proposal is data.
+
+Duplicate decision is data.
+
+Invalid decider is data.
+
+Approved-but-never-executed is normal.
+
+Rejected proposal is normal.
+
+No proposal decision should ever execute work.
+
+Stress Test
+
+Create:
+
+```text
+100 proposals
+```
+
+Approve:
+
+```text
+50
+```
+
+Reject:
+
+```text
+50
+```
+
+Verify:
+
+* rebuild succeeds
+* audit passes
+* validate_chain() succeeds
+* inbox entry count does not increase from approval alone
+* no claims are created
+* no dispatch occurs
+* no artifact_written events occur because of approval
+
+Tests
+
+Required tests
+
+1. approval succeeds.
+2. rejection succeeds.
+3. unknown proposal rejected.
+4. invalid decider rejected.
+5. duplicate approval rejected.
+6. approval after rejection rejected.
+7. rejection after approval rejected.
+8. decisions terminal.
+9. proposal_approved event recorded.
+10. proposal_rejected_by_user event recorded.
+11. proposal_decision_rejected event recorded.
+12. decision projection rebuilt.
+13. decided_at derived from ledger timestamp.
+14. rebuild deterministic.
+15. rebuild idempotent.
+16. approved proposals are not inbox entries.
+17. approved proposals are not claims.
+18. approved proposals are not dispatched.
+19. approved proposals do not create artifact_written.
+20. approval module does not import dispatcher.
+21. approval module does not import claim store.
+22. approval module does not call submit_intent.
+23. approval module does not call run_command.
+24. audit validates decisions.
+25. audit verifies no automatic execution.
+26. audit treats approved-but-unexecuted as valid.
+27. audit remains read-only.
+28. validate_chain() still succeeds.
+29. 100-proposal approval/rejection stress test passes.
+
+Explicitly Deferred
+
+* automatic promotion
+* proposal execution
+* proposal-to-inbox bridge
+* planning
+* routing
+* memory
+* tools
+* MCP
+* agent loops
+* recursive execution
+* mind-submitted intents
+* approval-triggered dispatch
+* human UI
+
+Definition of Done
+
+Leira can record suggestion and approval separately.
+
+Suggestions are evidence.
+
+Approvals are evidence.
+
+Neither is action.
+
+Authority is explicit.
+
+Execution remains separate.
+
+The caller chooses.
+
+The inbox governs.
+
+The claim store locks.
+
+The dispatcher executes.
+
+The kernel remains boring.
+
+Meaning belongs to minds.
+
+Mechanics belong to the kernel.
+
+Remember:
+
+Workers think.
+
+Minds think.
+
+Minds suggest.
+
+Humans approve.
+
+Kernel gates.
+
+Ledger remembers.
+
+Projections serve.
+
+Auditors verify.
+
+Truth lives in receipts.
+
+A proposal is not an intent.
+
+Approval is not execution.
+
+Build approval.
+
+Do not build the agent.

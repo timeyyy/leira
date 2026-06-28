@@ -1,0 +1,312 @@
+# Leira v4.3 — Execution Adapter Compatibility Check
+
+## Mission
+
+Implement a deterministic compatibility check between a `DispatchPlan` and an `ExecutionCapability`.
+
+This is **not** execution.
+
+This is **not** orchestration.
+
+This is **not** scheduling.
+
+This is **not** autonomy.
+
+It only determines whether a declared adapter capability can accept a dispatcher plan.
+
+---
+
+## Context
+
+Leira already contains:
+
+* Dispatcher Kernel
+* Dispatcher Kernel Receipt Layer
+* Execution Adapter Contract
+
+Treat these as complete.
+
+Do not redesign them.
+
+---
+
+## Files
+
+Create or extend only:
+
+```text
+leira/execution_adapter_contract/
+    __init__.py
+    contract.py
+    test_execution_adapter_contract.py
+```
+
+Modify nothing else unless strictly necessary.
+
+---
+
+## New Public API
+
+Create immutable dataclass:
+
+```text
+ExecutionCompatibilityResult
+```
+
+Fields:
+
+```text
+dispatch_plan
+execution_capability
+compatible
+reason_codes
+```
+
+`reason_codes` must be a tuple.
+
+No timestamps.
+
+No generated identifiers.
+
+No randomness.
+
+---
+
+## Function
+
+Implement:
+
+```text
+check_execution_compatibility(...)
+```
+
+Inputs:
+
+```text
+DispatchPlan
+ExecutionCapability
+```
+
+Returns:
+
+```text
+ExecutionCompatibilityResult
+```
+
+---
+
+## Compatibility Rules
+
+A dispatch plan is compatible only if:
+
+```text
+dispatch_plan.dispatch_type in execution_capability.supported_dispatch_types
+dispatch_plan.subject_kind in execution_capability.supported_subject_kinds
+dispatch_plan.execution_mode in execution_capability.supported_execution_modes
+dispatch_plan.target_label == execution_capability.adapter_label
+```
+
+If all rules pass:
+
+```text
+compatible = True
+reason_codes = ("compatible",)
+```
+
+If one or more rules fail, use deterministic reason codes in this exact order:
+
+```text
+unsupported_dispatch_type
+unsupported_subject_kind
+unsupported_execution_mode
+target_label_mismatch
+```
+
+Example:
+
+```text
+compatible = False
+reason_codes = ("unsupported_subject_kind", "target_label_mismatch")
+```
+
+---
+
+## Markdown
+
+Implement:
+
+```text
+execution_compatibility_markdown(...)
+```
+
+Top-level sections must be exactly:
+
+```text
+# Execution Compatibility Check
+
+## Dispatch Plan
+
+## Execution Capability
+
+## Compatibility Result
+
+## Provenance Notice
+```
+
+The provenance notice must state:
+
+```text
+This compatibility check validates declared adapter compatibility only. It performs no execution, scheduling, planning, orchestration, approval, or dispatch.
+```
+
+---
+
+## File Output
+
+Implement:
+
+```text
+write_execution_compatibility(...)
+```
+
+Writes:
+
+```text
+.leira/execution_adapter_compatibility/<dispatch_id>.<adapter_label>.compatibility.md
+```
+
+Derived output only.
+
+---
+
+## Determinism Requirements
+
+For identical inputs:
+
+```text
+same DispatchPlan
+same ExecutionCapability
+```
+
+must produce:
+
+```text
+same compatibility result
+same markdown
+same file path
+same file bytes
+```
+
+No hidden state.
+
+No repository scanning.
+
+No filesystem inspection except explicit write target.
+
+No clocks.
+
+No timestamps.
+
+No UUIDs.
+
+No randomness.
+
+---
+
+## Explicit Guardrails
+
+Do not implement:
+
+* execution
+* subprocess
+* shell commands
+* worker invocation
+* adapter implementation
+* S integration
+* Claude integration
+* Codex integration
+* Antigravity integration
+* scheduling
+* orchestration
+* retries
+* queueing
+* planner logic
+* browser automation
+* AI calls
+* networking
+* repository loading
+* policy loading
+* databases
+* project-state mutation
+
+---
+
+## Tests
+
+Create comprehensive pytest coverage verifying:
+
+* immutable compatibility result
+* all-pass compatibility
+* each individual failure reason
+* multiple failure reasons in stable order
+* target label mismatch
+* deterministic markdown
+* deterministic file output
+* byte-identical repeated rendering
+* byte-identical repeated writes
+* DispatchPlan preserved exactly
+* ExecutionCapability preserved exactly
+* no execution
+* no subprocess
+* no shell commands
+* no scheduling
+* no orchestration
+* no AI calls
+* no browser automation
+* no networking
+* no clocks
+* no timestamps
+* no UUIDs
+* no randomness
+* no repository scanning
+* no ledger access
+
+Run:
+
+```bash
+pytest leira/execution_adapter_contract/test_execution_adapter_contract.py
+```
+
+Also run the full test suite if practical.
+
+---
+
+## Deliverables
+
+Provide:
+
+1. Files changed
+2. Test commands executed
+3. Test results
+4. Example compatibility markdown
+5. Example compatible result
+6. Example incompatible result
+7. Recommended smallest next commit
+
+Suggested commit message:
+
+```text
+Add execution adapter compatibility check
+```
+
+---
+
+## Steward's Law
+
+Keep it boring.
+
+The contract says what an adapter claims it can accept.
+
+The compatibility check says whether a dispatch plan matches that claim.
+
+Neither may execute anything.

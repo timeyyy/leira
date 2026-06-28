@@ -1,0 +1,463 @@
+Implement Leira v2.8: CLI Views
+
+Mission
+
+Extend Leira from a machine with internal views into a machine with human-facing commands.
+
+The goal is not a dashboard.
+
+The goal is not a service.
+
+The goal is not a TUI.
+
+The goal is not control.
+
+The goal is to expose existing evidence through deterministic, scriptable commands.
+
+The machine must be able to say:
+
+> Show me the current state.
+>
+> Show me the audit report.
+>
+> Show me receipts.
+>
+> Show me proposals.
+>
+> Show me sessions.
+>
+> Show me minds.
+>
+> No state was changed.
+
+Nothing more.
+
+Hard Constraints
+
+* Python only.
+* Single process only.
+* Blocking only.
+* Library first.
+* CLI second.
+* No daemon.
+* No server.
+* No HTTP.
+* No websockets.
+* No background threads.
+* No event creation.
+* No dispatch.
+* No shell execution.
+* No repairs.
+* No notifications.
+* No subscriptions.
+* No progress bars.
+* No colors required.
+* No interactive prompts.
+* No dynamic command discovery.
+* No plugin loading.
+* No agent loops.
+
+Do not redesign:
+
+* ledger
+* projections
+* status view
+* audit report
+* receipts
+* proposals
+* sessions
+* archive
+* workspace
+* provenance
+
+Adapt existing structure minimally.
+
+Files
+
+```text
+leira/
+  cli/
+    main.py
+    test_cli.py
+```
+
+Mission
+
+CLI exposes.
+
+CLI does not control.
+
+CLI is a lens.
+
+Not a dashboard.
+
+Nothing more.
+
+Implementation
+
+Use Python standard library:
+
+```python
+argparse
+```
+
+Prefer a flat command structure.
+
+Do not implement dynamic subcommands.
+
+Do not scan modules.
+
+Register commands explicitly.
+
+Example structure:
+
+```python
+def main():
+    parser = argparse.ArgumentParser(prog="leira")
+    subparsers = parser.add_subparsers(dest="command")
+
+    status_parser = subparsers.add_parser("status")
+    status_parser.set_defaults(func=handle_status)
+
+    audit_parser = subparsers.add_parser("audit")
+    audit_parser.set_defaults(func=handle_audit)
+
+    ...
+```
+
+Commands
+
+Implement:
+
+```text
+leira status
+```
+
+Uses only:
+
+```python
+get_status_view()
+format_status_view()
+```
+
+Implement:
+
+```text
+leira audit
+```
+
+Uses only:
+
+```python
+generate_audit_report()
+format_report()
+```
+
+Implement:
+
+```text
+leira receipts <intent_id>
+```
+
+Uses existing receipt APIs.
+
+Implement:
+
+```text
+leira proposals
+```
+
+Uses proposal projections.
+
+Implement:
+
+```text
+leira sessions
+```
+
+Uses session projections.
+
+Implement:
+
+```text
+leira minds
+```
+
+Uses mind projections.
+
+Implement:
+
+```text
+leira help
+```
+
+or equivalent argparse help output.
+
+Rules
+
+Commands are read-only.
+
+Commands do not mutate state.
+
+Commands do not rebuild projections.
+
+Commands do not repair.
+
+Commands do not dispatch workers.
+
+Commands do not invoke minds.
+
+Commands do not execute shell commands.
+
+Commands do not submit inbox intents.
+
+Commands do not acquire claims.
+
+Commands do not approve proposals.
+
+Commands do not walk the ledger when projections already exist.
+
+Import Boundary
+
+The CLI should avoid importing:
+
+```text
+dispatcher
+proposal_approval
+shell adapter
+claim store
+worker implementations
+```
+
+Prefer importing only:
+
+```text
+views
+audit
+receipts
+projections
+```
+
+The CLI should be structurally incapable of performing work.
+
+Formatting
+
+Output should be:
+
+* deterministic
+* stable
+* plain text
+* human readable
+* grep-able
+* diff-able
+
+No ANSI colors required.
+
+No progress bars.
+
+No interactive prompts.
+
+No recommendations.
+
+No urgency.
+
+No repair suggestions.
+
+No speculation.
+
+Determinism
+
+Running:
+
+```text
+leira status
+```
+
+twice against an unchanged database should produce byte-for-byte identical output.
+
+Running:
+
+```text
+leira audit
+```
+
+twice with fixed timestamps should produce identical output.
+
+Failure Model
+
+Missing intent is data.
+
+Empty system is valid.
+
+Audit failures are valid.
+
+Corrupt projections are valid.
+
+Unknown session is data.
+
+CLI reports.
+
+CLI does not fix.
+
+Kernel Rules
+
+CLI is a view.
+
+CLI is not authority.
+
+CLI exposes existing APIs.
+
+Nothing more.
+
+Human Readability
+
+Output should remain stable over time.
+
+Fixed-width formatting is allowed.
+
+Section ordering should be deterministic.
+
+Example:
+
+```text
+Intents
+
+intent_001 COMPLETED
+intent_002 RUNNING
+
+Claims
+
+intent_002 worker_01
+
+Sessions
+
+session_alpha 3 intents
+
+Proposals
+
+proposal_001 APPROVED
+proposal_002 PENDING
+
+Minds
+
+Claude:sonnet
+EchoMind
+OpenAI:gpt-5
+```
+
+Stress Test
+
+Populate:
+
+```text
+100 intents
+50 proposals
+20 sessions
+5 minds
+```
+
+Verify:
+
+```text
+leira status
+leira audit
+leira receipts
+leira proposals
+leira sessions
+leira minds
+```
+
+produce deterministic output.
+
+Tests
+
+Required tests
+
+1. status command succeeds.
+2. audit command succeeds.
+3. receipts command succeeds.
+4. proposals command succeeds.
+5. sessions command succeeds.
+6. minds command succeeds.
+7. help command succeeds.
+8. empty system output valid.
+9. no events appended.
+10. no repairs occur.
+11. no projection rebuild occurs.
+12. no shell execution occurs.
+13. no dispatch occurs.
+14. no inbox submission occurs.
+15. no proposal approval occurs.
+16. no worker invocation occurs.
+17. no mind invocation occurs.
+18. deterministic output.
+19. formatting stable.
+20. audit remains independent.
+21. status remains independent.
+22. commands remain read-only.
+23. output is grep-able.
+24. output is diff-able.
+25. CLI avoids importing dispatcher modules.
+26. fixed timestamps produce identical output.
+27. stress test passes.
+
+Explicitly Deferred
+
+* dashboard
+* TUI
+* web UI
+* notifications
+* services
+* HTTP
+* websockets
+* monitoring
+* planning
+* orchestration
+* agents
+* plugin loading
+* command discovery
+* interactive mode
+
+Definition of Done
+
+Humans can inspect the workshop.
+
+Without changing it.
+
+Views expose.
+
+Reports explain.
+
+CLI presents.
+
+Nothing more.
+
+Remember:
+
+Workers think.
+
+Minds think.
+
+Minds suggest.
+
+Humans approve.
+
+Kernel gates.
+
+Ledger remembers.
+
+Projections serve.
+
+Auditors verify.
+
+Reports explain.
+
+Views observe.
+
+CLI exposes.
+
+Truth lives in receipts.
+
+Build visibility.
+
+Do not build control.

@@ -1,0 +1,371 @@
+# Leira v2.1 — Flow Policy Projection
+
+## Mission
+
+Implement the first deterministic **Flow Policy Projection**.
+
+This is **not** a planner.
+
+This is **not** an AI.
+
+This is **not** a dispatcher.
+
+This is **not** human judgement.
+
+It is a deterministic read model that derives the **currently permitted lifecycle action** from:
+
+* a Lifecycle Projection
+* an explicit Flow Policy
+
+It does not invent work.
+
+It does not choose between alternatives.
+
+It merely evaluates deterministic policy rules.
+
+---
+
+# Architectural Review
+
+Leira now possesses:
+
+* immutable evidence
+* immutable lifecycle projections
+
+However, every caller must still manually determine:
+
+> "Given this lifecycle state, what action is currently permitted?"
+
+This knowledge should become deterministic.
+
+The Flow Policy Projection answers:
+
+> "According to the supplied policy, what lifecycle action is currently available?"
+
+It never answers:
+
+> "What is the best thing to do?"
+
+That remains human judgement.
+
+---
+
+# Steward's Law
+
+Keep it boring.
+
+The Flow Policy Projection may evaluate explicit rules.
+
+It must never invent new ones.
+
+---
+
+# Files
+
+Create:
+
+```text
+leira/flow_policy_projection/
+    __init__.py
+    flow_policy.py
+    test_flow_policy_projection.py
+```
+
+Modify nothing else unless strictly necessary.
+
+---
+
+# Public API
+
+Create immutable dataclasses.
+
+## FlowPolicy
+
+Fields:
+
+```text
+policy_name
+
+rules
+```
+
+`rules` is a caller-supplied ordered tuple.
+
+No defaults.
+
+No hidden rules.
+
+---
+
+## FlowRule
+
+Fields:
+
+```text
+rule_id
+
+required_completed
+
+required_missing
+
+result_action
+```
+
+All fields caller supplied.
+
+The projection evaluates rules strictly in caller order.
+
+---
+
+## FlowPolicyProjection
+
+Fields:
+
+```text
+subject_id
+
+policy_name
+
+matched_rule_id
+
+recommended_action
+
+evaluation_trace
+```
+
+All immutable.
+
+No generated identifiers.
+
+No timestamps.
+
+No clocks.
+
+No randomness.
+
+---
+
+# Evaluation Rules
+
+Input:
+
+* LifecycleProjection
+* FlowPolicy
+
+Evaluation:
+
+Walk the rules **in caller order**.
+
+The first rule whose requirements are satisfied becomes the selected rule.
+
+If no rule matches:
+
+```text
+recommended_action = "NO_MATCH"
+matched_rule_id = None
+```
+
+No inference.
+
+No fallback heuristics.
+
+No ranking.
+
+No scoring.
+
+---
+
+# Functions
+
+Implement:
+
+```text
+create_flow_policy(...)
+
+create_flow_rule(...)
+
+evaluate_flow_policy(...)
+
+flow_policy_projection_markdown(...)
+
+write_flow_policy_projection(...)
+```
+
+Derived output only.
+
+Writes:
+
+```text
+.leira/flow_policy/<subject_id>.flow.md
+```
+
+---
+
+# Markdown Format
+
+```text
+# Flow Policy Projection
+
+## Subject
+
+...
+
+## Policy
+
+...
+
+## Matched Rule
+
+...
+
+## Recommended Action
+
+...
+
+## Evaluation Trace
+
+...
+
+## Provenance Notice
+
+This projection evaluates explicit deterministic policy rules.
+
+It performs no planning, approval, dispatch, execution or autonomous decision making.
+```
+
+Section order must never vary.
+
+---
+
+# Determinism Requirements
+
+Same lifecycle projection
+
+*
+
+same flow policy
+
+↓
+
+same projection
+
+↓
+
+same markdown
+
+↓
+
+same file bytes
+
+Rules are evaluated strictly in supplied order.
+
+No sorting.
+
+No hidden priorities.
+
+No randomness.
+
+No timestamps.
+
+No repository inspection.
+
+No filesystem inspection.
+
+No ledger queries.
+
+---
+
+# Tests
+
+Create comprehensive pytest coverage.
+
+Verify:
+
+* immutable dataclasses
+* deterministic policy creation
+* deterministic rule creation
+* deterministic evaluation
+* deterministic markdown
+* deterministic file output
+* byte-identical repeated rendering
+* byte-identical repeated writes
+* first matching rule wins
+* no matching rule returns NO_MATCH
+* evaluation trace preserved
+* caller rule ordering preserved
+* no sorting
+* no hidden priorities
+* no repository scanning
+* no filesystem inspection
+* no ledger access
+* no project-state mutation
+* no planner
+* no dispatcher
+* no workflow engine
+* no recommendation heuristics
+* no AI calls
+* no browser automation
+* no subprocess
+* no shell commands
+* no clocks
+* no timestamps
+* no UUIDs
+* no randomness
+
+---
+
+# Explicit Guardrails
+
+Do not implement:
+
+* planner
+* dispatcher
+* workflow engine
+* autonomous decision making
+* recommendation heuristics
+* approval
+* rejection
+* execution
+* subprocess
+* shell commands
+* CLI
+* browser automation
+* AI adapters
+* repository scanning
+* filesystem inspection
+* ledger queries
+* database
+* project-state mutation
+
+---
+
+# Design Constraint
+
+The Flow Policy Projection operates **only** on:
+
+* the supplied LifecycleProjection
+* the supplied FlowPolicy
+
+It must never inspect evidence directly.
+
+It must never reconstruct lifecycle state.
+
+It must never load policy from disk.
+
+Everything required for evaluation is supplied explicitly by the caller.
+
+---
+
+# Why This Slice Exists
+
+This is the first deterministic interpretation layer in Leira.
+
+Evidence describes reality.
+
+Lifecycle Projection summarizes reality.
+
+Flow Policy Projection determines which lifecycle action is permitted according to explicit policy.
+
+Future Human Decision Records and Dispatcher layers will consume this projection.
+
+The Flow Policy Projection remains purely derived, deterministic, inspectable, and replayable.

@@ -1,0 +1,120 @@
+# Leira v1.18 — Verification Record
+
+## Mission
+
+Implement deterministic Verification Record support.
+
+This slice records independently observed verification evidence for an Implementation Report.
+
+It does not approve, reject, dispatch, execute, or decide what happens next.
+
+It merely preserves what was checked and what was observed.
+
+## Files
+
+Create:
+
+leira/verification_record/
+    __init__.py
+    verification.py
+    test_verification_record.py
+
+## Public API
+
+Create immutable dataclass:
+
+VerificationRecord
+
+Fields:
+
+verification_id
+implementation_report_id
+verifier_label
+source_label
+checks_run
+observed_results
+observed_failures
+observed_files_created
+observed_files_modified
+observed_files_deleted
+commands_observed
+reason_codes
+verification_summary
+
+All fields caller supplied.
+
+No timestamps.
+No UUIDs.
+No randomness.
+No generated identifiers.
+
+All sequence fields preserve caller order exactly.
+
+## Functions
+
+create_verification_record(...)
+
+verification_record_markdown(...)
+
+write_verification_record(...)
+
+Writes:
+
+.leira/verification_records/<verification_id>.verification.md
+
+## Markdown Sections
+
+# Verification Record
+
+## Verification ID
+
+## Implementation Report
+
+## Verifier
+
+## Source
+
+## Checks Run
+
+## Observed Results
+
+## Observed Failures
+
+## Observed Files Created
+
+## Observed Files Modified
+
+## Observed Files Deleted
+
+## Commands Observed
+
+## Reason Codes
+
+## Verification Summary
+
+## Provenance Notice
+
+This record preserves verification observations as evidence.
+
+It does not approve, reject, dispatch, execute or decide next action.
+
+## Tests
+
+Verify immutability, determinism, byte-identical markdown/file output, exact ordering preservation for all sequence fields, exact summary preservation, no clocks/timestamps/UUIDs/randomness/generated IDs, no approval/rejection, no dispatch, no execution/subprocess, no planner, no CLI, no AI calls, no ledger/database persistence, no project-state mutation.
+
+## Guardrails
+
+Do not implement:
+- approval
+- rejection
+- next-action decision
+- dispatch
+- execution
+- subprocess
+- shell commands
+- planner
+- CLI
+- AI adapters
+- ledger persistence
+- database
+- project-state mutation

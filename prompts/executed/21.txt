@@ -1,0 +1,557 @@
+Implement Leira v2.1: OpenAI Mind
+
+Mission
+
+Extend Leira from a machine that hosts minds into a machine that can host its first external API-backed intelligence.
+
+The goal is not agents.
+
+The goal is not orchestration.
+
+The goal is not memory.
+
+The goal is not prompt engineering.
+
+The goal is to prove that OpenAI can participate as a Mind while preserving the same mechanical guarantees as EchoMind.
+
+The machine must be able to say:
+
+> A request was made.
+>
+> OpenAI responded or failed.
+>
+> Here is exactly what was requested.
+>
+> Here is exactly what was returned.
+>
+> Here is which model was configured.
+>
+> No secret was recorded.
+>
+> The kernel does not know that OpenAI exists.
+
+Nothing more.
+
+Hard Constraints
+
+* Python only.
+* SQLite only.
+* Blocking only.
+* Single process only.
+* Library, not service.
+* No threads.
+* No async.
+* No daemon.
+* No retries.
+* No streaming.
+* No memory.
+* No tools.
+* No function calling.
+* No planning.
+* No reflection.
+* No recursive calls.
+* No multi-agent systems.
+* No agent loops.
+* No prompt generation.
+* No automatic context injection.
+* No shell execution.
+* No dispatch access.
+* No inbox access.
+* No special OpenAI lifecycle path.
+* No API keys in ledger.
+* No API keys in receipts.
+* No API keys in environment snapshots.
+
+Do not redesign:
+
+* ledger
+* dispatcher
+* worker protocol
+* Mind protocol
+* MindWorker
+* claims
+* receipts
+* workspace
+* provenance
+* environment
+* archive
+* auditor
+
+Adapt existing structure minimally.
+
+Files
+
+```text
+leira/
+  minds/
+    openai_mind.py
+    test_openai_mind.py
+```
+
+Mission
+
+OpenAI is a guest.
+
+OpenAI is not special.
+
+The kernel remains ignorant.
+
+Meaning belongs to the mind.
+
+Mechanics belong to the kernel.
+
+Nothing more.
+
+Implementation
+
+Implement:
+
+```python
+class OpenAIMind(Mind):
+```
+
+Constructor:
+
+```python
+OpenAIMind(
+    model: str,
+    api_key: str,
+    timeout_seconds: int = 60
+)
+```
+
+Properties:
+
+```python
+name: str
+```
+
+Suggested name:
+
+```python
+OpenAI:<model>
+```
+
+Invoke:
+
+```python
+invoke(
+    request: MindRequest
+) -> MindResponse
+```
+
+Request
+
+Input:
+
+```python
+MindRequest(
+    text="..."
+)
+```
+
+Output:
+
+```python
+MindResponse(
+    success=True,
+    text="..."
+)
+```
+
+Rules
+
+One request.
+
+One response.
+
+No streaming.
+
+No conversation history.
+
+No hidden context.
+
+No retries.
+
+No interpretation.
+
+No prompt templates.
+
+No automatic system prompt.
+
+If the API requires a message structure, wrap only the provided request text.
+
+Adapter Boundary
+
+The OpenAI adapter owns:
+
+* client initialization
+* HTTP request
+* timeout handling
+* API failure mapping
+* response parsing
+* partial/empty response handling
+
+The kernel owns:
+
+* recording
+* receipts
+* projections
+* audit mechanics
+
+The kernel must not import OpenAI.
+
+The dispatcher must not import OpenAI.
+
+The worker protocol must not import OpenAI.
+
+Failure Handling
+
+All operational failures return:
+
+```python
+MindResponse(
+    success=False,
+    text="",
+    error_type="...",
+    error_message="..."
+)
+```
+
+Never raise operational exceptions from the adapter.
+
+Suggested error types:
+
+```text
+AUTH_FAILURE
+RATE_LIMIT
+TIMEOUT
+NETWORK_FAILURE
+POLICY_VIOLATION
+EMPTY_RESPONSE
+UNEXPECTED_RESPONSE
+UNEXPECTED
+```
+
+Map moderation, safety, or policy refusals/errors to:
+
+```text
+POLICY_VIOLATION
+```
+
+Map malformed API responses to:
+
+```text
+UNEXPECTED_RESPONSE
+```
+
+Map empty model output to:
+
+```text
+EMPTY_RESPONSE
+```
+
+Secret Hygiene
+
+Never record:
+
+* api_key
+* Authorization headers
+* raw client config containing secrets
+* environment variables containing secrets
+
+Allowed to record:
+
+* mind_name
+* model
+* request text
+* response text
+* error_type
+* error_message if scrubbed of secrets
+
+Before storing error_message, scrub obvious secret-bearing substrings.
+
+Model Provenance
+
+Record the configured model name as provenance metadata in the mind output.
+
+Example worker output:
+
+```python
+{
+    "mind_name": "OpenAI:gpt-...",
+    "model": "gpt-...",
+    "request": "...",
+    "response": "..."
+}
+```
+
+Environment Integration
+
+Environment snapshots may capture:
+
+```text
+OPENAI_MODEL
+```
+
+or configured model name.
+
+They must never capture:
+
+```text
+OPENAI_API_KEY
+```
+
+or any secret-bearing environment variable.
+
+Provenance Boundary
+
+Git provenance records local source code.
+
+Environment provenance records local runtime context.
+
+OpenAI model provenance records configured model name only.
+
+Leira does not attempt to prove:
+
+* remote model weights
+* OpenAI internal state
+* training data
+* server-side implementation
+
+Artifact Path
+
+Responses appear through ordinary:
+
+```text
+worker_result
+```
+
+artifacts via MindWorker.
+
+No special OpenAI artifact type is required.
+
+No special OpenAI lifecycle exists.
+
+Example worker_result artifact:
+
+```python
+{
+    "type": "worker_result",
+    "content": {
+        "intent_id": "...",
+        "worker_name": "OpenAI:gpt-...",
+        "inputs": {
+            "text": "hello"
+        },
+        "outputs": {
+            "mind_name": "OpenAI:gpt-...",
+            "model": "gpt-...",
+            "request": "hello",
+            "response": "hello"
+        },
+        "worker_success": True,
+        "error_type": None,
+        "error_message": ""
+    }
+}
+```
+
+Kernel Rules
+
+The kernel does not know about:
+
+* OpenAI
+* models
+* tokens
+* prompts
+* HTTP
+* API errors
+* rate limits
+* moderation
+* policies
+
+It records:
+
+```python
+request
+response
+mind_name
+model
+error_type
+```
+
+Nothing more.
+
+Acting Boundary
+
+OpenAIMind must not:
+
+* run shell commands
+* call dispatcher
+* mutate workspace
+* submit inbox intents
+* register workers
+* release claims
+* inspect Git
+* inspect environment
+
+The mind thinks.
+
+It does not act.
+
+Receipt Integration
+
+Receipts preserve:
+
+```python
+mind_name
+model
+request
+response
+error_type
+error_message
+```
+
+Nothing more.
+
+Audit Extension
+
+Verify:
+
+* OpenAI responses are ordinary worker_result artifacts
+* request text preserved
+* response text preserved
+* model preserved
+* failures preserved
+* secrets absent from ledger artifacts
+* secrets absent from receipts
+* environment snapshots do not include API keys
+* no special OpenAI lifecycle exists
+
+Audit remains read-only.
+
+Testing Strategy
+
+Unit tests must not call the real OpenAI API.
+
+Use a fake client or injected transport.
+
+Test adapter behavior mechanically.
+
+Optional live API tests may be separate and skipped by default.
+
+Stress Tests
+
+Execute:
+
+```text
+100 fake OpenAIMind requests
+```
+
+through:
+
+```text
+Inbox
+→ Claim
+→ Dispatch
+→ MindWorker
+→ OpenAIMind
+→ Ledger
+→ Receipt
+```
+
+Verify:
+
+* rebuild succeeds
+* audit passes
+* validate_chain() succeeds
+* no secrets recorded
+
+Tests
+
+Required tests
+
+1. successful response captured.
+2. network failure captured as NETWORK_FAILURE.
+3. auth failure captured as AUTH_FAILURE.
+4. timeout captured as TIMEOUT.
+5. rate limit captured as RATE_LIMIT.
+6. policy/moderation failure captured as POLICY_VIOLATION.
+7. malformed response captured as UNEXPECTED_RESPONSE.
+8. empty response captured as EMPTY_RESPONSE.
+9. no operational exceptions escape adapter.
+10. kernel remains unaware of OpenAI.
+11. dispatcher remains unaware of OpenAI.
+12. response recorded as ordinary worker_result.
+13. no special OpenAI lifecycle path exists.
+14. receipts preserve request and response.
+15. receipts preserve model name.
+16. API keys never recorded in ledger.
+17. API keys never recorded in receipts.
+18. API keys never recorded in environment snapshots.
+19. error messages are scrubbed of secrets.
+20. no shell execution occurs.
+21. no dispatcher access from mind.
+22. no inbox access from mind.
+23. rebuild deterministic.
+24. rebuild idempotent.
+25. audit validates responses.
+26. audit validates secret absence.
+27. audit remains read-only.
+28. validate_chain() still succeeds.
+29. fake-client 100-request stress test passes.
+30. live API tests are optional and skipped by default.
+
+Explicitly Deferred
+
+* streaming
+* retries
+* memory
+* tools
+* function calling
+* MCP
+* multi-turn conversation
+* prompt templates
+* system prompts
+* autonomous loops
+* reflection
+* self-improvement
+* multi-agent systems
+* mind-submitted intents
+* Claude
+* Gemini
+
+Definition of Done
+
+Leira hosts its first real external mind.
+
+OpenAI remains a guest.
+
+The kernel remains boring.
+
+The dispatcher remains boring.
+
+The model name is evidence.
+
+The API key is never evidence.
+
+Mind output is data.
+
+Not command.
+
+Not truth.
+
+Not authority.
+
+Meaning belongs to the mind.
+
+Mechanics belong to the kernel.
+
+Intelligence lives at the edges.
+
+Truth lives in receipts.
+
+Build the guest.
+
+Do not build the agent.

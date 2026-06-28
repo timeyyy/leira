@@ -1,0 +1,604 @@
+Implement Leira v2.2: Mind Registry
+
+Mission
+
+Extend Leira from a machine that hosts one real mind into a machine that can host many minds as interchangeable guests.
+
+The goal is not multi-agent systems.
+
+The goal is not consensus.
+
+The goal is not debate.
+
+The goal is not routing.
+
+The goal is to prove that cognition can be registered, resolved, wrapped, and dispatched without the kernel knowing or caring what kind of mind produced the response.
+
+The machine must be able to say:
+
+> EchoMind was registered.
+>
+> OpenAIMind was registered.
+>
+> ClaudeMind may be registered later.
+>
+> The caller chose one.
+>
+> The registry resolved it.
+>
+> The dispatcher saw only a Worker.
+>
+> The kernel did not know the difference.
+
+Nothing more.
+
+Hard Constraints
+
+* Python only.
+* SQLite only.
+* Single process only.
+* Blocking only.
+* Library, not service.
+* In-memory registry only.
+* No threads.
+* No async.
+* No daemon.
+* No routing.
+* No ranking.
+* No consensus.
+* No voting.
+* No debate.
+* No orchestration.
+* No automatic selection.
+* No retries.
+* No memory.
+* No planning.
+* No reflection.
+* No agent loops.
+* No dynamic imports.
+* No plugin loading.
+* No network discovery.
+* No automatic registration.
+
+Do not redesign:
+
+* worker registry
+* worker protocol
+* Mind protocol
+* MindWorker
+* dispatcher
+* claims
+* receipts
+* workspace
+* provenance
+* environment
+* archive
+* auditor
+
+Adapt existing structure minimally.
+
+Files
+
+```text
+leira/
+  minds/
+    registry.py
+    test_mind_registry.py
+```
+
+Mission
+
+Minds are named guests.
+
+The registry is a directory.
+
+Not a router.
+
+Not a council.
+
+Not a debate engine.
+
+Nothing more.
+
+Mind Registry
+
+Implement:
+
+```python
+class MindRegistry:
+```
+
+Implement:
+
+```python
+register(
+    mind: Mind
+) -> RegisterMindResult
+```
+
+Implement:
+
+```python
+get(
+    mind_name: str
+) -> Mind | None
+```
+
+Implement:
+
+```python
+list_minds() -> list[str]
+```
+
+Implement:
+
+```python
+contains(
+    mind_name: str
+) -> bool
+```
+
+Result
+
+```python
+@dataclass(frozen=True)
+class RegisterMindResult:
+    success: bool
+    mind_name: str | None
+    error_type: str | None = None
+```
+
+Name Rules
+
+Mind names:
+
+* come from mind.name
+* must be non-empty strings
+* must be unique
+* are case-sensitive
+* are immutable after registration
+* are provenance metadata
+* are not routing metadata
+
+If registered:
+
+```text
+OpenAI:gpt-example
+```
+
+then lookup:
+
+```text
+openai:gpt-example
+```
+
+must fail.
+
+Honesty requires exact names.
+
+Registry Storage
+
+Use a simple in-process dictionary:
+
+```python
+dict[str, Mind]
+```
+
+The registry stores references only.
+
+It must return the same object instance that was registered.
+
+No cloning.
+
+No serialization.
+
+No instantiation.
+
+No dynamic imports.
+
+No plugin loading.
+
+No module scanning.
+
+No network discovery.
+
+Registration Rules
+
+Successful registration appends:
+
+```text
+mind_registered
+```
+
+Rejected registration appends:
+
+```text
+mind_registration_rejected
+```
+
+Duplicate names return:
+
+```text
+DUPLICATE_MIND
+```
+
+Invalid mind returns:
+
+```text
+INVALID_MIND
+```
+
+Storage failure returns:
+
+```text
+STORAGE_FAILURE
+```
+
+Registration Atomicity
+
+Do not allow registry memory and ledger history to diverge.
+
+For successful registration:
+
+1. validate mind
+2. append mind_registered to ledger
+3. update in-memory registry only after ledger append succeeds
+
+If ledger append fails:
+
+* do not store mind in registry
+* return typed failure
+* error_type="STORAGE_FAILURE"
+
+For rejected registration:
+
+* append mind_registration_rejected where possible
+* return typed failure
+* do not store mind in registry
+
+No successful in-memory registration may exist without a ledger event.
+
+Mind Registration Artifact
+
+Successful artifact:
+
+```python
+{
+    "type": "mind_registration",
+    "content": {
+        "mind_name": "EchoMind",
+        "status": "REGISTERED",
+        "error_type": None
+    }
+}
+```
+
+Rejected artifact:
+
+```python
+{
+    "type": "mind_registration",
+    "content": {
+        "mind_name": "EchoMind",
+        "status": "REJECTED",
+        "error_type": "DUPLICATE_MIND"
+    }
+}
+```
+
+Dispatcher Integration
+
+Caller supplies:
+
+```python
+mind_name
+```
+
+Registry resolves:
+
+```python
+Mind
+```
+
+MindWorker wraps:
+
+```python
+Mind
+```
+
+Dispatcher sees:
+
+```python
+Worker
+```
+
+No mind-specific dispatch path exists.
+
+No separate reasoning path exists.
+
+No kernel awareness exists.
+
+Optional helper:
+
+```python
+dispatch_mind_by_name(
+    intent_id: str,
+    mind_name: str
+)
+```
+
+Algorithm:
+
+1. exact lookup by mind_name
+2. if missing, return typed failure:
+
+```text
+UNKNOWN_MIND
+```
+
+3. wrap with MindWorker
+4. delegate to ordinary dispatch_once or dispatch_and_track
+
+No extra logic.
+
+No fallback.
+
+No routing.
+
+No automatic choice.
+
+Kernel Rules
+
+The kernel does not:
+
+* choose minds
+* compare minds
+* rank minds
+* vote between minds
+* combine responses
+* create debates
+* evaluate answers
+* route based on model name
+* inspect model capabilities
+
+The caller chooses.
+
+The registry resolves.
+
+The dispatcher executes.
+
+The ledger remembers.
+
+Nothing more.
+
+Projection
+
+Create:
+
+```text
+mind_projection
+```
+
+Fields:
+
+```python
+mind_name
+created_at
+last_event_id
+```
+
+Projection is derived.
+
+created_at comes from ledger timestamps.
+
+Never use:
+
+```python
+datetime.now()
+```
+
+during rebuild.
+
+Projection Rebuild
+
+Scan ledger events chronologically:
+
+```text
+mind_registered
+mind_registration_rejected
+```
+
+Rules:
+
+* mind_registered creates registered mind name in projection
+* mind_registration_rejected does not create registered mind name
+* duplicate registration history is detectable by audit
+* projection can reconstruct names, not live Python objects
+
+Rebuild must be:
+
+* deterministic
+* idempotent
+* transactional
+
+Mind Projection vs Live Registry
+
+The in-memory MindRegistry cannot be reconstructed from the ledger because Mind objects are process references.
+
+The mind_projection can be reconstructed from the ledger because names are history.
+
+Do not pretend replay can recreate Python objects.
+
+It can only recreate the record that a mind name was registered.
+
+Audit Extension
+
+Verify:
+
+* registered mind names match ledger
+* duplicate mind registrations are detected
+* rejected registrations are preserved
+* rejected registrations do not appear as registered minds
+* mind_projection matches ledger
+* created_at equals ledger event timestamp
+* last_event_id equals mind_registered event id
+* registry stores references only
+* no routing semantics exist
+
+Audit remains read-only.
+
+Audit reports disagreement.
+
+It does not repair.
+
+Ordering Requirement
+
+Projection rebuild must process mind_registered events before validating dispatch records that reference those minds.
+
+If history contains dispatch using an unregistered mind name, audit should report:
+
+```text
+UNKNOWN_MIND_REFERENCE
+```
+
+Do not repair.
+
+Do not infer registration.
+
+Stress Tests
+
+Register:
+
+```text
+EchoMind
+OpenAIMind
+FakeMind
+```
+
+Then dispatch explicitly by each exact name.
+
+Verify:
+
+* lookup succeeds
+* wrong-case lookup fails
+* same object instance is returned
+* MindWorker wraps each mind
+* dispatcher remains unaware of minds
+* rebuild succeeds
+* audit passes
+* validate_chain() succeeds
+
+Tests
+
+Required tests
+
+1. register succeeds.
+2. duplicate registration rejected.
+3. invalid mind rejected.
+4. get succeeds.
+5. unknown get returns None.
+6. contains succeeds.
+7. list_minds deterministic.
+8. exact names required.
+9. wrong-case lookup fails.
+10. same object instance returned.
+11. no cloning occurs.
+12. no serialization occurs.
+13. no dynamic imports occur.
+14. no plugin loading occurs.
+15. mind_registered event recorded.
+16. mind_registration_rejected event recorded.
+17. registry update happens only after successful ledger append.
+18. ledger append failure prevents in-memory registration.
+19. rejected registration never stores mind.
+20. projection rebuilt correctly.
+21. rejected registrations excluded from projection.
+22. created_at derived from ledger timestamp.
+23. rebuild deterministic.
+24. rebuild idempotent.
+25. audit validates projection.
+26. audit detects duplicate registration history.
+27. audit detects UNKNOWN_MIND_REFERENCE.
+28. audit remains read-only.
+29. dispatch by name wraps with MindWorker.
+30. dispatch by name delegates to ordinary dispatch.
+31. dispatcher remains unaware of minds.
+32. registry does not choose minds.
+33. registry does not rank minds.
+34. registry does not compare minds.
+35. validate_chain() still succeeds.
+36. multiple-mind stress test passes.
+
+Explicitly Deferred
+
+* ClaudeMind
+* GeminiMind
+* MCP
+* tools
+* routing
+* consensus
+* debate
+* voting
+* ensembles
+* memory
+* prompt generation
+* planning
+* reflection
+* agent loops
+* automatic mind selection
+* capability metadata
+* model scoring
+
+Definition of Done
+
+Leira can host many minds.
+
+Minds remain interchangeable guests.
+
+The registry resolves exact names.
+
+The caller chooses.
+
+The dispatcher remains boring.
+
+The kernel remains ignorant.
+
+Live registry references are process memory.
+
+Registered names are ledger history.
+
+Meaning belongs to minds.
+
+Mechanics belong to the kernel.
+
+Remember:
+
+Workers think.
+
+Minds think.
+
+Kernel gates.
+
+Ledger remembers.
+
+Projections serve.
+
+Auditors verify.
+
+Receipts preserve evidence.
+
+Archives preserve history.
+
+Environment preserves context.
+
+Intelligence lives at the edges.
+
+Truth lives in receipts.
+
+A registry resolves.
+
+A router chooses.
+
+Build the registry.
+
+Do not build the council.

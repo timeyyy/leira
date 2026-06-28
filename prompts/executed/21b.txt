@@ -1,0 +1,130 @@
+# Leira v1.11 — Prompt Feedback Record
+
+Implement a deterministic feedback-recording layer for prompt drafts.
+
+Purpose:
+
+```text
+project_state
+→ draft packet
+→ feedback record
+```
+
+This slice records feedback as evidence. It does not revise, approve, reject, reconcile, dispatch, or call minds.
+
+## Create
+
+```text
+leira/prompt_feedback/
+  __init__.py
+  feedback.py
+  test_prompt_feedback.py
+```
+
+## Core concept
+
+A feedback record attaches externally supplied feedback text to a specific draft.
+
+Feedback may come from Tim, Claude, Aura, Aether, Codex, or any future seat, but the implementation must treat all sources as plain labelled evidence.
+
+No source receives authority.
+
+## Data model
+
+Create immutable value objects:
+
+```text
+FeedbackRecord
+- draft_id
+- participant
+- feedback_text
+- feedback_hash
+- source_label
+```
+
+Optional if needed:
+
+```text
+FeedbackBundle
+- draft_id
+- feedback_records
+```
+
+## Determinism
+
+* feedback_hash is deterministic hash of feedback_text.
+* identical inputs produce identical records.
+* records are sorted deterministically by participant name when bundled.
+* no timestamps.
+* no clocks.
+* no randomness.
+* no generated IDs.
+
+## Storage
+
+Default behavior: return feedback records as data.
+
+Optional helper may write derived scratch output to:
+
+```text
+.leira/feedback/<draft_id>.feedback.md
+```
+
+This output is derived and may be regenerated.
+
+No ledger mutation.
+
+## Markdown output
+
+If writing a feedback bundle, use deterministic markdown.
+
+Required sections:
+
+1. Header
+2. Draft ID
+3. Participants
+4. Feedback Records
+5. Source Labels
+6. Explicit Non-Reconciliation Notice
+
+The notice must say:
+
+```text
+This feedback bundle preserves observations and disagreements.
+It does not reconcile, rank, approve, reject, or revise the draft.
+```
+
+## Guardrails
+
+Do not implement:
+
+* feedback classification
+* semantic analysis
+* disagreement objects
+* proposal system
+* approval
+* revision
+* dispatch
+* CLI
+* minds
+* adapters
+* browser automation
+
+## Tests
+
+Verify:
+
+* deterministic feedback hash
+* same input produces same FeedbackRecord
+* feedback bundle ordering is deterministic
+* optional markdown output is byte-identical across repeated runs
+* no ledger mutation
+* feedback is not classified
+* disagreement is preserved as text, not resolved
+* no proposal/approval/revision/dispatch/CLI/mind/adapter code added
+
+## Definition of done
+
+A caller can create feedback records for a draft from multiple participants and render a deterministic feedback bundle.
+
+Nothing else.

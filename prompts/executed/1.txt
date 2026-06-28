@@ -1,0 +1,342 @@
+Implement Leira v0: the smallest honest local event ledger.
+
+
+
+Mission:
+
+Build the v0 kernel for Leira, a parent workshop/dispatcher system. This is NOT an agent system yet. This is NOT orchestration yet. The goal is only to preserve truth mechanically.
+
+
+
+Core idea:
+
+The machine must be able to say no.
+
+
+
+Hard constraints:
+
+- Python only.
+
+- SQLite only.
+
+- Single process only.
+
+- Library, not service.
+
+- No network.
+
+- No daemon.
+
+- No async.
+
+- No threads.
+
+- No worker adapters.
+
+- No LLM calls.
+
+- No routing logic.
+
+- No UI.
+
+- No projection cache in v0.
+
+- No optimistic concurrency/conflict machinery in v0.
+
+- No quota manager.
+
+- No human approval system.
+
+- No auditors beyond validate_chain().
+
+- Do not implement future architecture.
+
+
+
+Scope:
+
+Create a minimal hash-chained append-only event ledger.
+
+
+
+Suggested files:
+
+
+
+leira/
+
+  dispatcher/
+
+    __init__.py
+
+    kernel.py
+
+    schema.sql
+
+    test_kernel.py
+
+
+
+If an existing project structure already exists, adapt minimally. Do not redesign unrelated files.
+
+
+
+Schema:
+
+Create one primary table:
+
+
+
+ledger_events:
+
+- id TEXT PRIMARY KEY
+
+- parent_event_hash TEXT NOT NULL
+
+- event_type TEXT NOT NULL
+
+- worker_id TEXT NOT NULL
+
+- payload_json TEXT NOT NULL
+
+- artifact_hash TEXT
+
+- event_hash TEXT NOT NULL
+
+- created_at TEXT NOT NULL
+
+
+
+Optional if useful:
+
+- operation_id TEXT
+
+
+
+Do NOT add projections in v0.
+
+Do NOT add resulting_version / expected_version unless strictly necessary for a single head check.
+
+Do NOT build multi-writer OCC.
+
+
+
+Append-only enforcement:
+
+Add SQLite triggers preventing UPDATE and DELETE on ledger_events.
+
+
+
+Hashing:
+
+Use plain SHA-256 over canonicalized event content.
+
+
+
+Canonicalization requirements:
+
+- Use deterministic JSON:
+
+  json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+- Reject floats in payloads.
+
+- Reject NaN / Infinity.
+
+- Reject non-string dictionary keys.
+
+- Normalize strings to Unicode NFC before hashing.
+
+- Keep payload_json as small metadata, not large artifact content.
+
+
+
+Hash input should include:
+
+- parent_event_hash
+
+- event_type
+
+- worker_id
+
+- artifact_hash
+
+- payload_json
+
+- created_at
+
+
+
+Use a fixed genesis parent hash for the first event:
+
+0000000000000000000000000000000000000000000000000000000000000000
+
+
+
+Important security scope:
+
+Document explicitly:
+
+The hash chain protects against accidental mutation, silent corruption, and replay mismatch.
+
+It does NOT protect against malicious local actors, compromised kernels, or filesystem theft.
+
+
+
+Kernel API:
+
+Implement:
+
+
+
+append_event(...)
+
+validate_chain(...)
+
+
+
+append_event should:
+
+- load the current head event hash, or use genesis hash if empty
+
+- canonicalize and validate payload
+
+- compute event_hash
+
+- insert the event in a SQLite transaction
+
+- return a typed result object
+
+
+
+Use typed results instead of normal operational exceptions.
+
+
+
+Example:
+
+
+
+@dataclass(frozen=True)
+
+class AppendResult:
+
+    success: bool
+
+    event_id: str | None = None
+
+    event_hash: str | None = None
+
+    error_type: str | None = None
+
+    message: str | None = None
+
+
+
+validate_chain should:
+
+- read events in insertion order
+
+- recompute every event hash
+
+- verify each parent_event_hash matches the previous event_hash
+
+- return a typed result object indicating success/failure
+
+- on failure, report the exact event_id where validation failed
+
+- never repair ledger corruption automatically
+
+
+
+Testing:
+
+Write tests for:
+
+
+
+1. valid append creates one ledger row
+
+2. second append chains to first event hash
+
+3. UPDATE on ledger_events is blocked
+
+4. DELETE on ledger_events is blocked
+
+5. tampering with payload_json causes validate_chain() to fail
+
+6. non-string dict keys are rejected
+
+7. float payload values are rejected
+
+8. Unicode normalization produces stable hashes for equivalent strings
+
+9. validate_chain() passes for an untampered chain
+
+
+
+Do not add clever features.
+
+
+
+Explicitly deferred:
+
+- projections
+
+- rebuild_projection
+
+- snapshots
+
+- workers
+
+- adapters
+
+- quotas
+
+- conductor loop
+
+- routing
+
+- MCP
+
+- OpenAI/Claude/Gemini integration
+
+- multi-process access
+
+- network service
+
+- dashboards
+
+- claim registry
+
+- belief_promoted
+
+- convergence receipts
+
+- operation contracts
+
+
+
+Definition of done:
+
+- Tests pass.
+
+- Ledger is append-only.
+
+- Hash chain validates.
+
+- Tampering is detected.
+
+- Invalid payloads are rejected.
+
+- README or docstring clearly states v0 security limits.
+
+
+
+Remember:
+
+This first implementation target is not useful work.
+
+It is mechanical honesty.
+

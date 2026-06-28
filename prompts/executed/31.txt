@@ -1,0 +1,371 @@
+# Leira v2.0 — Lifecycle Projection
+
+## Mission
+
+Implement the first deterministic **Lifecycle Projection**.
+
+This is **not** a dispatcher.
+
+This is **not** a planner.
+
+This is **not** a workflow engine.
+
+This is a read model.
+
+Its purpose is to derive the current lifecycle state of an engineering artifact from existing immutable evidence.
+
+The projection owns no canonical state.
+
+It performs no mutation.
+
+It merely answers:
+
+> "Given the evidence currently present, where is this piece of work in the lifecycle?"
+
+---
+
+# Architectural Review
+
+Leira now possesses immutable evidence objects for nearly every stage of the engineering lifecycle:
+
+* Prompt Draft
+* Knowledge Gap
+* Review Question
+* Review Record
+* Prompt Revision
+* Human Decision
+* Dispatch Record
+* Implementation Report
+* Verification Record
+
+However, the kernel has no deterministic way to *view* this evidence as a coherent lifecycle.
+
+Humans currently reconstruct that mentally.
+
+This slice removes that burden.
+
+The Lifecycle Projection is a projection only.
+
+It derives.
+
+It never decides.
+
+---
+
+# Steward's Law
+
+Keep it boring.
+
+The projection may answer:
+
+> "What evidence exists?"
+
+It must never answer:
+
+> "What should happen next?"
+
+That belongs to future Flow Policy projections.
+
+---
+
+# Files
+
+Create:
+
+```text
+leira/lifecycle_projection/
+    __init__.py
+    lifecycle.py
+    test_lifecycle_projection.py
+```
+
+Modify nothing else unless strictly necessary.
+
+---
+
+# Public API
+
+Create immutable dataclasses.
+
+## LifecycleProjection
+
+Fields:
+
+```text
+subject_id
+
+subject_kind
+
+prompt_draft_present
+
+knowledge_gap_present
+
+review_question_present
+
+review_record_present
+
+prompt_revision_present
+
+human_decision_present
+
+dispatch_record_present
+
+implementation_report_present
+
+verification_record_present
+
+missing_evidence
+
+completed_evidence
+```
+
+All fields are immutable.
+
+No generated identifiers.
+
+No timestamps.
+
+No clocks.
+
+No UUIDs.
+
+No randomness.
+
+---
+
+## EvidencePresence
+
+Create a small immutable value object representing whether an evidence object exists.
+
+Fields:
+
+```text
+label
+
+present
+```
+
+---
+
+# Functions
+
+Implement:
+
+```text
+build_lifecycle_projection(...)
+```
+
+Inputs are caller supplied evidence objects (or None).
+
+No repository scanning.
+
+No ledger queries.
+
+No filesystem inspection.
+
+No inference beyond explicit presence.
+
+Returns:
+
+```text
+LifecycleProjection
+```
+
+---
+
+Implement:
+
+```text
+lifecycle_projection_markdown(...)
+```
+
+Returns deterministic markdown.
+
+---
+
+Implement:
+
+```text
+write_lifecycle_projection(...)
+```
+
+Optional derived scratch writer.
+
+Writes:
+
+```text
+.leira/lifecycle/<subject_id>.lifecycle.md
+```
+
+Derived output only.
+
+---
+
+# Markdown Format
+
+```text
+# Lifecycle Projection
+
+## Subject
+
+...
+
+## Evidence
+
+Prompt Draft .................. PRESENT
+
+Knowledge Gap ................. PRESENT
+
+Review Question ............... PRESENT
+
+Review Record ................. MISSING
+
+Prompt Revision ............... MISSING
+
+Human Decision ............... MISSING
+
+Dispatch Record .............. MISSING
+
+Implementation Report ........ MISSING
+
+Verification Record .......... MISSING
+
+## Completed Evidence
+
+...
+
+## Missing Evidence
+
+...
+
+## Provenance Notice
+
+This projection derives lifecycle state from supplied evidence.
+
+It performs no planning, dispatch, execution, approval or workflow transitions.
+```
+
+Section order must never vary.
+
+---
+
+# Determinism Requirements
+
+Same supplied evidence
+
+↓
+
+same projection
+
+↓
+
+same markdown
+
+↓
+
+same file bytes
+
+No sorting.
+
+No hidden state.
+
+No repository inspection.
+
+No ledger queries.
+
+No clocks.
+
+No randomness.
+
+No automatic ordering.
+
+No inferred evidence.
+
+Presence is determined solely from supplied objects.
+
+---
+
+# Tests
+
+Create comprehensive pytest coverage.
+
+Verify:
+
+* immutable dataclasses
+* deterministic projection creation
+* deterministic markdown
+* deterministic file output
+* byte-identical repeated rendering
+* byte-identical repeated writes
+* completed_evidence ordering preserved
+* missing_evidence ordering preserved
+* presence flags correct
+* all evidence absent
+* all evidence present
+* mixed evidence
+* no repository scanning
+* no filesystem inspection
+* no ledger access
+* no project-state mutation
+* no dispatcher imports
+* no planner
+* no flow policy
+* no AI calls
+* no browser automation
+* no subprocess
+* no shell commands
+* no clocks
+* no timestamps
+* no UUIDs
+* no randomness
+
+---
+
+# Explicit Guardrails
+
+Do not implement:
+
+* dispatcher
+* planner
+* workflow engine
+* flow policy
+* recommendation engine
+* approval
+* rejection
+* execution
+* subprocess
+* shell commands
+* CLI
+* browser automation
+* AI adapters
+* repository scanning
+* filesystem inspection
+* ledger queries
+* database
+* project-state mutation
+
+---
+
+# Design Constraint
+
+The projection must be entirely derived from the evidence explicitly supplied by the caller.
+
+It must never discover evidence on its own.
+
+Future slices may introduce deterministic evidence assemblers.
+
+This slice is intentionally limited to projection.
+
+---
+
+# Why This Slice Exists
+
+This is the first slice where Leira begins to use the evidence it has accumulated.
+
+It does not introduce a new evidence type.
+
+Instead, it introduces the first deterministic lens through which the engineering lifecycle can be observed.
+
+This marks the transition from building isolated evidence objects to building deterministic read models.
+
+Future Flow Policy projections and Dispatcher lenses will build on this projection rather than reconstructing lifecycle state independently.

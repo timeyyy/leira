@@ -1,0 +1,80 @@
+Implement Leira v1.9: Project State View.
+
+Goal:
+Create a deterministic, read-only project_state view that makes the current Leira project status explicit before adding Minds, OpenAI/Claude adapters, proposal approval, or CLI views.
+
+Do not implement minds, agents, LLM adapters, proposal generation, approval, CLI, browser automation, or new orchestration.
+
+Context:
+Current repo has ledger, lifecycle, dispatcher, workers, inbox, registry, claims, receipts, workspace, provenance, sessions, archive/replay, environment snapshots, and 427 passing tests. Prompt backlog 1-19 is implemented. Prompts 20-28 are postponed.
+
+Create:
+leira/project_state/
+  __init__.py
+  state.py
+  test_project_state.py
+
+ProjectState must be a read-only derived view. It must not be authoritative state.
+
+It may read:
+- existing ledger/projections/audit data
+- prompt files from prompts/
+- static repo evidence such as README when useful
+
+Every field must label its source:
+- ledger
+- projection
+- prompt_files
+- static_file
+- audit
+
+Expose at minimum:
+- ledger/audit health summary
+- known modules/features present
+- prompt backlog inventory
+- prompt status: implemented, partially_implemented, not_implemented, postponed, superseded, conflicts
+- next unimplemented prompt number
+- postponed prompt list, especially 20-28 if appropriate
+- README/source drift
+- current failing tests if evidence is available
+- explicit missing capabilities: minds, proposal system, approval system, CLI, project-state feedback loop
+- unreconciled disagreement field if evidence exists
+
+Important:
+project_state must not resolve disagreement.
+If disagreement exists, surface it as open evidence.
+Do not merge, vote, summarize away, or adjudicate disagreement.
+
+Add tests proving:
+- project_state is read-only
+- project_state can be rebuilt deterministically
+- prompt files are inventoried
+- prompt 20 is detected as next unimplemented numeric prompt
+- prompts 20-28 can be marked postponed by deterministic config or rule
+- filesystem-derived observations are source-labeled
+- README drift can be surfaced if detectable
+- no ledger mutation occurs
+- no mind/adapter/proposal/approval/CLI code is added
+
+Definition of done:
+A caller can import project_state and ask:
+- what exists now
+- what prompt backlog exists
+- what is implemented
+- what is postponed
+- what is missing
+- what the next mechanical prompt would be
+- what evidence/source supports each answer
+
+Hard constraints:
+- no agents
+- no LLMs
+- no OpenAI/Claude adapter
+- no proposal generation
+- no approval workflow
+- no CLI
+- no new dispatcher behavior
+- no mutation
+- no refactor of ledger/kernel/lifecycle/audit
+- projections remain disposable
+- ledger remains truth

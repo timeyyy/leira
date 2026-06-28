@@ -1,0 +1,505 @@
+Implement Leira v2.6: Audit Report
+
+Mission
+
+Extend Leira from a machine that verifies integrity into a machine that can testify about integrity.
+
+The goal is not repair.
+
+The goal is not administration.
+
+The goal is not automatic correction.
+
+The goal is to produce a deterministic, human-readable report describing what the auditor discovered.
+
+The machine must be able to say:
+
+> Here are the facts.
+>
+> Here are the failures.
+>
+> Here are the inconsistencies.
+>
+> No changes were made.
+
+Nothing more.
+
+Hard Constraints
+
+* Python only.
+* SQLite only.
+* Single process only.
+* Blocking only.
+* Library, not service.
+* No threads.
+* No async.
+* No daemon.
+* No repair.
+* No automatic correction.
+* No mutation during audit.
+* No event creation.
+* No projection rebuild.
+* No proposal creation.
+* No inbox submission.
+* No dispatch.
+* No shell execution.
+* No agent loops.
+* No hidden timestamps in findings.
+
+Do not redesign:
+
+* ledger
+* projections
+* receipts
+* archive
+* workspace
+* provenance
+* environment
+* proposals
+* approvals
+* dispatcher
+* registry
+* claims
+* auditor
+
+Adapt existing structure minimally.
+
+Files
+
+```text
+leira/
+  audit/
+    report.py
+    test_report.py
+```
+
+Mission
+
+Audit verifies.
+
+Report explains.
+
+Report does not repair.
+
+Nothing more.
+
+Core Types
+
+Implement:
+
+```python
+@dataclass(frozen=True)
+class AuditFinding:
+    code: str
+    severity: str
+    description: str
+    metadata: dict
+```
+
+Implement:
+
+```python
+@dataclass(frozen=True)
+class AuditReport:
+    created_at: str
+    passed: bool
+    findings: list[AuditFinding]
+    summary: dict
+```
+
+API
+
+Implement:
+
+```python
+generate_audit_report() -> AuditReport
+```
+
+Implement:
+
+```python
+format_report(
+    report: AuditReport
+) -> str
+```
+
+Rules
+
+AuditReport is derived.
+
+AuditReport is disposable.
+
+AuditReport is not stored in the ledger.
+
+AuditReport is not authoritative.
+
+The ledger remains truth.
+
+The report is a deterministic view.
+
+Nothing more.
+
+Separation of Fact and Rendering
+
+AuditFinding is the fact.
+
+format_report is the renderer.
+
+Do not embed presentation logic into the finding generator.
+
+Do not embed audit logic into the formatter.
+
+Severity
+
+Allowed values:
+
+```text
+INFO
+WARNING
+ERROR
+```
+
+Report passes if and only if there are no:
+
+```text
+ERROR
+```
+
+findings.
+
+Finding Codes
+
+Use deterministic codes.
+
+Examples:
+
+```text
+HASH_CHAIN_INVALID
+MISSING_ARTIFACT_FILE
+HASH_MISMATCH
+SIZE_MISMATCH
+UNKNOWN_MIND_REFERENCE
+DUPLICATE_CLAIM
+PROJECTION_DISAGREEMENT
+UNKNOWN_INTENT
+AUTOMATIC_EXECUTION_DETECTED
+DUPLICATE_PROPOSAL
+DUPLICATE_PROPOSAL_DECISION
+INVALID_TRANSITION
+SECRET_LEAK_DETECTED
+```
+
+Metadata Rules
+
+Finding metadata must contain only immutable identifiers and observed facts.
+
+Allowed examples:
+
+```python
+{
+    "intent_id": "...",
+    "event_id": "...",
+    "artifact_id": "...",
+    "relative_path": "...",
+    "expected_sha256": "...",
+    "observed_sha256": "..."
+}
+```
+
+Forbidden:
+
+* datetime.now()
+* process ids
+* volatile runtime data
+* random ordering
+* guessed causes
+* repair suggestions
+
+Report Created Timestamp
+
+The only allowed new timestamp is:
+
+```python
+AuditReport.created_at
+```
+
+All findings must remain deterministic aside from report.created_at.
+
+For tests, allow injecting fixed:
+
+```python
+created_at
+```
+
+so full formatted output can be byte-stable.
+
+Summary
+
+Include:
+
+```python
+{
+    "events": ...,
+    "intents": ...,
+    "proposals": ...,
+    "approvals": ...,
+    "artifacts": ...,
+    "sessions": ...,
+    "minds": ...,
+    "finding_count": ...,
+    "error_count": ...,
+    "warning_count": ...,
+    "info_count": ...
+}
+```
+
+Rules
+
+Summary values come from ledger and projections.
+
+Summary must handle an empty database cleanly.
+
+Empty ledger is not failure.
+
+Empty system should produce a passing report.
+
+Determinism
+
+Findings must be sorted deterministically before report creation.
+
+Sort by:
+
+```python
+(
+    severity_order,
+    code,
+    canonical_json(metadata)
+)
+```
+
+Use severity order:
+
+```text
+ERROR
+WARNING
+INFO
+```
+
+Use canonical metadata serialization:
+
+```python
+json.dumps(
+    metadata,
+    sort_keys=True,
+    separators=(",", ":")
+)
+```
+
+Report Rules
+
+Reports are read-only.
+
+Reports do not mutate state.
+
+Reports do not create ledger events.
+
+Reports do not update projections.
+
+Reports do not trigger rebuild.
+
+Reports do not perform repairs.
+
+Reports do not execute workers.
+
+Reports do not inspect current Git state.
+
+Reports do not submit proposals or intents.
+
+Human Readability
+
+`format_report` should be deterministic and plain text.
+
+Example:
+
+```text
+Audit Status: FAILED
+
+Summary:
+events: 128
+intents: 12
+artifacts: 7
+finding_count: 2
+error_count: 1
+warning_count: 1
+
+---
+
+ERROR
+HASH_MISMATCH
+Artifact file hash did not match ledger descriptor.
+
+artifact_id: art_123
+relative_path: intents/abc/output.json
+expected_sha256: ...
+observed_sha256: ...
+
+---
+
+WARNING
+UNKNOWN_MIND_REFERENCE
+A worker_result referenced an unregistered mind.
+
+mind_name: Claude:old-model
+intent_id: intent_456
+```
+
+Formatting Rules
+
+* stable section order
+* stable key order
+* no random IDs
+* no volatile timestamps except report.created_at if included
+* no markdown required
+* no repair instructions
+* no recommendations
+* no speculation
+
+Kernel Rules
+
+The report does not:
+
+* interpret causes
+* repair findings
+* rank beyond severity
+* suppress findings
+* guess intent
+* decide next actions
+
+It exposes facts.
+
+Nothing more.
+
+Failure Model
+
+Broken chain is data.
+
+Missing file is data.
+
+Duplicate claim is data.
+
+Automatic execution is data.
+
+The report describes.
+
+It does not fix.
+
+Stress Test
+
+Corrupt:
+
+* projection
+* artifact file
+* claim state
+* proposal decision history
+
+Verify:
+
+* report detects issues
+* report sorts findings deterministically
+* report does not repair issues
+* validate_chain() remains independent
+
+Tests
+
+Required tests
+
+1. report generated.
+2. report deterministic with fixed created_at.
+3. findings sorted deterministically.
+4. metadata serialized canonically.
+5. formatting deterministic.
+6. report does not mutate state.
+7. report does not append events.
+8. report does not rebuild projections.
+9. report does not execute shell.
+10. report does not invoke dispatcher.
+11. missing artifact detected.
+12. hash mismatch detected.
+13. size mismatch detected.
+14. duplicate proposal detected.
+15. duplicate proposal decision detected.
+16. duplicate claim detected.
+17. unknown mind reference detected.
+18. projection disagreement detected.
+19. automatic execution detected.
+20. invalid transition detected.
+21. secret leak detected.
+22. empty system produces passing report.
+23. summary counts correct.
+24. summary handles empty database.
+25. INFO/WARNING/ERROR counts correct.
+26. passed=false when ERROR exists.
+27. passed=true when only INFO/WARNING exist.
+28. finding metadata contains only stable identifiers/facts.
+29. format_report separates facts from rendering.
+30. report survives 1000-event history.
+31. validate_chain() independent from report.
+32. audit remains read-only.
+33. stress test passes.
+
+Explicitly Deferred
+
+* automatic repair
+* self-healing
+* repair suggestions
+* notifications
+* dashboards
+* scheduling
+* memory
+* planning
+* agents
+* orchestration
+* ranking beyond severity
+* prioritization
+* root-cause analysis
+* natural-language summarization by LLM
+
+Definition of Done
+
+Leira can explain what it discovered.
+
+Not repair it.
+
+The report is evidence.
+
+Not authority.
+
+The ledger remains truth.
+
+The report is a witness explaining another witness.
+
+Remember:
+
+Workers think.
+
+Minds think.
+
+Minds suggest.
+
+Humans approve.
+
+Kernel gates.
+
+Ledger remembers.
+
+Projections serve.
+
+Auditors verify.
+
+Reports explain.
+
+Truth lives in receipts.
+
+Build explanation.
+
+Do not build repair.

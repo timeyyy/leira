@@ -1,0 +1,286 @@
+Implement Leira v0.2: Run Lifecycle Receipts
+
+Mission
+
+Extend the existing Local Event Ledger and Operation Envelope with the smallest possible run lifecycle.
+
+The goal is not execution.
+
+The goal is to preserve honest history.
+
+The machine must be able to say:
+
+> An operation was validated.
+>
+> A run was created.
+>
+> A run completed.
+
+Nothing more.
+
+Hard Constraints (Boring First)
+
+* Use Python.
+* Use SQLite.
+* Single process only.
+* Library, not service.
+* No workers.
+* No adapters.
+* No routing.
+* No LLM calls.
+* No UI.
+* No async.
+* No threads.
+* No daemon.
+* No scheduler.
+* No queue.
+* No projections.
+* No run table.
+* No claim registry.
+* No semantic validation.
+* No execution logic.
+* No retries.
+* No timeout logic.
+* No cleanup logic.
+
+Do not redesign the existing ledger or operation envelope.
+
+Source Structure
+
+Suggested files:
+
+```text
+leira/
+  dispatcher/
+    kernel.py
+    envelope.py
+    lifecycle.py
+    test_lifecycle.py
+```
+
+Adapt existing structure minimally.
+
+Run Lifecycle
+
+Supported events:
+
+```text
+operation_validated
+run_created
+state_running
+artifact_written
+state_completed
+```
+
+No other states.
+
+State Machine
+
+Represent transitions as data.
+
+Example:
+
+```python
+ALLOWED_TRANSITIONS = {
+    "run_created": ["state_running"],
+    "state_running": ["artifact_written"],
+    "artifact_written": ["state_completed"],
+    "state_completed": []
+}
+```
+
+Lifecycle Rules
+
+Allowed:
+
+```text
+run_created
+→ state_running
+
+state_running
+→ artifact_written
+
+artifact_written
+→ state_completed
+```
+
+Rejected:
+
+```text
+run_created
+→ state_completed
+
+state_completed
+→ state_running
+```
+
+The kernel must enforce transitions mechanically.
+
+The kernel must not interpret what the states mean.
+
+Operation Validation
+
+operation_validated is an operation-level event.
+
+It is not part of a run.
+
+An operation may eventually have multiple runs.
+
+run_created must include operation_id inside payload_json to establish parentage.
+
+Persistence
+
+Do not create a runs table.
+
+All lifecycle events must be appended to the existing ledger_events table.
+
+Truth is the ledger.
+
+Run state is derived.
+
+Implement:
+
+```python
+validate_operation_envelope(path)
+create_run(operation_id)
+append_lifecycle_event(run_id, event_type)
+get_run_state(run_id)
+```
+
+Return typed results instead of operational exceptions.
+
+Example:
+
+```python
+@dataclass(frozen=True)
+class LifecycleResult:
+    success: bool
+    error_type: str | None = None
+    message: str | None = None
+    run_id: str | None = None
+    current_state: str | None = None
+```
+
+Artifact Written
+
+For v0.2:
+
+artifact_written is only a lifecycle event.
+
+Do not introduce artifact storage.
+
+Do not require files to exist.
+
+Orphaned Runs
+
+If:
+
+```text
+operation_validated
+```
+
+exists but:
+
+```text
+run_created
+```
+
+never happens,
+
+that is not an error.
+
+If:
+
+```text
+state_running
+```
+
+is the last event forever,
+
+that is not an error.
+
+The ledger is a witness.
+
+It is not responsible for cleanup or recovery.
+
+State Derivation
+
+get_run_state(run_id) should derive state from the ledger.
+
+Example approach:
+
+```sql
+SELECT *
+FROM ledger_events
+WHERE payload_json contains run_id
+ORDER BY rowid DESC
+LIMIT 1;
+```
+
+Do not cache run state.
+
+Tests
+
+Write tests for:
+
+1. create_run creates a run_created event.
+2. Valid lifecycle sequence succeeds.
+3. Invalid transitions are rejected.
+4. state_completed cannot transition further.
+5. get_run_state derives the current state from the ledger.
+6. LifecycleResult is returned instead of normal operational exceptions.
+7. Lifecycle events are appended to the existing ledger.
+8. operation_validated remains separate from run lifecycle.
+9. validate_chain() still succeeds.
+
+Explicitly Deferred
+
+* workers
+* adapters
+* dispatch loop
+* quotas
+* approvals
+* scheduling
+* queues
+* artifact storage
+* projections
+* claim registry
+* belief promotion
+* convergence
+* execution
+* retries
+* timeouts
+* cleanup
+* multiple processes
+
+Definition of Done
+
+The machine can honestly record:
+
+```text
+operation_validated
+
+run_created
+
+state_running
+
+artifact_written
+
+state_completed
+```
+
+The machine can say:
+
+> No, that transition is invalid.
+
+And nothing more.
+
+Remember:
+
+The implementation target is not execution.
+
+It is honest history.
+
+The machine should preserve what happened.
+
+Not decide what should happen.

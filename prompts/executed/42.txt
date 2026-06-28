@@ -1,0 +1,377 @@
+# Leira v4.2 — Execution Adapter Contract
+
+## Mission
+
+Define the deterministic contract between the **Dispatcher Kernel** and all future execution layers.
+
+This is **not** an execution engine.
+
+This is **not** orchestration.
+
+This is **not** scheduling.
+
+This is **not** autonomy.
+
+This is **not** a worker implementation.
+
+The Execution Adapter Contract defines the immutable interface that every execution adapter must satisfy.
+
+It performs no execution.
+
+---
+
+# Context
+
+The following components already exist and are considered complete:
+
+* Dispatch Draft
+* Dispatch Commit
+* Dispatcher Kernel
+* Dispatcher Kernel Receipt Layer
+
+Treat these as stable.
+
+Do not redesign them.
+
+---
+
+# Architecture
+
+Current pipeline:
+
+```text
+DispatchDraft
+      │
+      ▼
+DispatchRecord
+      │
+      ▼
+Dispatcher Kernel
+      │
+      ▼
+DispatchPlan
+```
+
+This prompt introduces the next deterministic boundary:
+
+```text
+DispatchPlan
+      │
+      ▼
+Execution Adapter Contract
+```
+
+Nothing may execute beyond this boundary yet.
+
+---
+
+# Files
+
+Create:
+
+```text
+leira/execution_adapter_contract/
+    __init__.py
+    contract.py
+    test_execution_adapter_contract.py
+```
+
+Modify nothing else unless strictly necessary.
+
+---
+
+# Public API
+
+Create immutable dataclasses.
+
+## ExecutionCapability
+
+Fields:
+
+```text
+adapter_label
+adapter_kind
+supported_dispatch_types
+supported_subject_kinds
+supported_execution_modes
+supports_parallel_execution
+supports_dry_run
+supports_interactive_execution
+```
+
+---
+
+## ExecutionIntent
+
+Fields:
+
+```text
+dispatch_id
+adapter_label
+dispatch_type
+subject_kind
+execution_mode
+target_label
+```
+
+This is a pure projection from the DispatchPlan.
+
+No execution metadata.
+
+No runtime state.
+
+---
+
+## ExecutionAdapterResult
+
+Fields:
+
+```text
+dispatch_plan
+execution_intent
+execution_capability
+```
+
+No status.
+
+No success/failure.
+
+No timestamps.
+
+No execution outcome.
+
+---
+
+# Functions
+
+Implement:
+
+```text
+build_execution_intent(...)
+```
+
+Input:
+
+```text
+DispatchPlan
+adapter_label
+```
+
+Returns:
+
+```text
+ExecutionIntent
+```
+
+Pure field extraction only.
+
+---
+
+Implement:
+
+```text
+build_execution_adapter_result(...)
+```
+
+Inputs:
+
+```text
+DispatchPlan
+ExecutionIntent
+ExecutionCapability
+```
+
+Returns:
+
+```text
+ExecutionAdapterResult
+```
+
+No inference.
+
+No mutation.
+
+No validation beyond type checking.
+
+---
+
+Implement:
+
+```text
+execution_adapter_contract_markdown(...)
+```
+
+Returns deterministic markdown.
+
+---
+
+Implement:
+
+```text
+write_execution_adapter_contract(...)
+```
+
+Writes:
+
+```text
+.leira/execution_adapter_contract/<dispatch_id>.<adapter_label>.contract.md
+```
+
+Derived output only.
+
+---
+
+# Markdown
+
+Render exactly these sections in stable order:
+
+```text
+# Execution Adapter Contract
+
+## Dispatch Plan
+
+## Execution Intent
+
+## Execution Capability
+
+## Provenance Notice
+```
+
+The provenance notice must clearly state:
+
+> This contract describes what an execution adapter claims it is capable of accepting. It performs no execution, scheduling, planning, orchestration, approval, or dispatch.
+
+Section ordering must never vary.
+
+---
+
+# Determinism Requirements
+
+For identical inputs:
+
+```text
+same DispatchPlan
+same ExecutionCapability
+same adapter_label
+```
+
+must produce:
+
+```text
+same ExecutionIntent
+same ExecutionAdapterResult
+same markdown
+same output file bytes
+```
+
+No hidden state.
+
+No filesystem inspection.
+
+No repository scanning.
+
+No clocks.
+
+No timestamps.
+
+No UUIDs.
+
+No randomness.
+
+---
+
+# Explicit Guardrails
+
+Do not implement:
+
+* execution
+* subprocess
+* shell commands
+* worker invocation
+* adapters for Claude
+* adapters for ChatGPT
+* adapters for Codex
+* adapters for Antigravity
+* adapters for S
+* scheduling
+* orchestration
+* retries
+* queueing
+* planner logic
+* browser automation
+* AI calls
+* networking
+* repository loading
+* policy loading
+* databases
+* project-state mutation
+
+This prompt defines only the contract.
+
+---
+
+# Tests
+
+Create comprehensive pytest coverage verifying:
+
+* immutable dataclasses
+* deterministic intent creation
+* deterministic adapter result creation
+* deterministic markdown
+* deterministic file output
+* DispatchPlan preserved exactly
+* ExecutionIntent preserved exactly
+* ExecutionCapability preserved exactly
+* byte-identical repeated rendering
+* byte-identical repeated writes
+* no repository scanning
+* no filesystem inspection
+* no planner
+* no execution
+* no scheduling
+* no orchestration
+* no worker invocation
+* no subprocess
+* no shell commands
+* no AI calls
+* no browser automation
+* no networking
+* no clocks
+* no timestamps
+* no UUIDs
+* no randomness
+
+Run the dedicated test suite and the repository-wide test suite if practical.
+
+---
+
+# Deliverables
+
+Provide:
+
+1. Files created/modified
+2. Test commands executed
+3. Test results
+4. Example markdown contract
+5. Example dataclass instances
+6. Recommended smallest next commit
+
+Suggested commit message:
+
+```text
+Add deterministic execution adapter contract
+```
+
+---
+
+# Steward's Law
+
+Keep it boring.
+
+The Dispatcher Kernel determines what would be dispatched.
+
+The Execution Adapter Contract determines what an adapter claims it can accept.
+
+Neither may execute anything.
+
+Execution remains the responsibility of a future execution layer.

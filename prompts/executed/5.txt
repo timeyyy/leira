@@ -1,0 +1,292 @@
+Implement Leira v0.4: Shell Adapter
+
+Mission
+
+Extend the deterministic worker seam with the smallest external adapter.
+
+The goal is not intelligence.
+
+The goal is to prove Leira can safely invoke an external command and honestly record what happened.
+
+The machine must be able to say:
+
+> A command was executed.
+>
+> It succeeded or failed.
+>
+> Here is what it returned.
+
+Nothing more.
+
+Hard Constraints (Boring First)
+
+* Python only.
+* SQLite only.
+* Single process only.
+* Blocking only.
+* Library, not service.
+* No threads.
+* No async.
+* No daemon.
+* No LLM calls.
+* No routing.
+* No scheduler.
+* No retries.
+* No quotas.
+* No memory.
+* No background tasks.
+* No prompt generation.
+* No shell=True.
+
+Do not redesign the existing ledger, envelope, lifecycle, or worker seam.
+
+Files
+
+```text
+leira/
+  dispatcher/
+    shell.py
+    test_shell.py
+```
+
+Adapt existing structure minimally.
+
+Shell Adapter API
+
+Implement:
+
+```python
+run_command(command: list[str], timeout_seconds: int = 30) -> CommandResult
+```
+
+Use:
+
+```python
+subprocess.run(
+    command,
+    capture_output=True,
+    text=True,
+    check=False,
+    timeout=timeout_seconds
+)
+```
+
+Commands must be explicit argument lists.
+
+Allowed:
+
+```python
+["python", "--version"]
+["git", "status"]
+```
+
+Forbidden:
+
+```python
+"python --version"
+shell=True
+```
+
+Typed Result
+
+```python
+@dataclass(frozen=True)
+class CommandResult:
+    success: bool
+    exit_code: int
+    stdout: str
+    stderr: str
+    error_type: str | None = None
+```
+
+Rules
+
+* exit_code == 0 means command success.
+* exit_code != 0 is not kernel failure.
+* Non-zero exit is a successfully captured command result.
+* Command-not-found returns typed failure.
+* Timeout returns typed failure with exit_code=124 and error_type="TIMEOUT".
+* Never raise normal operational exceptions for command failure.
+
+Security Scope
+
+Document clearly:
+
+* run_shell_once is not a sandbox.
+* Commands inherit the Leira process environment.
+* Commands run with the same filesystem permissions as Leira.
+* v0.4 does not isolate secrets, filesystem access, CPU, or memory.
+
+Artifact Schema
+
+Shell artifacts must be:
+
+```python
+{
+    "type": "command_result",
+    "content": {
+        "command": [...],
+        "exit_code": 0,
+        "stdout": "...",
+        "stderr": "...",
+        "error_type": None
+    }
+}
+```
+
+Artifact Size
+
+* Enforce MAX_ARTIFACT_BYTES before appending artifact_written.
+* If stdout/stderr exceeds MAX_ARTIFACT_BYTES, truncate deterministically.
+* Add:
+
+```python
+"truncated": True
+```
+
+to the artifact.
+
+Lifecycle
+
+Implement:
+
+```python
+run_shell_once(run_id, command, timeout_seconds=30)
+```
+
+Sequence:
+
+1. append state_running
+2. execute command
+3. create command_result artifact
+4. enforce MAX_ARTIFACT_BYTES
+5. append artifact_written
+6. append state_completed
+
+If command exits non-zero:
+
+* still append artifact_written
+* still append state_completed
+* record exit_code and stderr honestly
+
+If command times out:
+
+* append artifact_written
+* record exit_code=124
+* record error_type="TIMEOUT"
+* append state_completed
+
+If artifact append fails:
+
+* do not append state_completed
+* return typed failure
+
+Kernel Rules
+
+The kernel does not interpret stdout.
+
+The kernel does not decide whether command output is good.
+
+The kernel only records:
+
+* command
+* exit_code
+* stdout
+* stderr
+* error_type
+
+The kernel is a witness.
+
+It is not a shell manager.
+
+Tests
+
+Proof commands should be portable and boring.
+
+Success:
+
+```python
+["python", "--version"]
+```
+
+Non-zero exit:
+
+```python
+["python", "-c", "import sys; sys.exit(7)"]
+```
+
+Stdout capture:
+
+```python
+["python", "-c", "print('hello from leira')"]
+```
+
+Stderr capture:
+
+```python
+["python", "-c", "import sys; print('warn', file=sys.stderr)"]
+```
+
+Timeout:
+
+```python
+["python", "-c", "import time; time.sleep(2)"]
+```
+
+with:
+
+```python
+timeout_seconds=1
+```
+
+Oversized output:
+
+```python
+["python", "-c", "print('x' * 100000)"]
+```
+
+Required tests:
+
+1. python --version succeeds.
+2. Non-zero exit is captured and recorded.
+3. stdout is captured.
+4. stderr is captured.
+5. timeout returns exit_code=124 and error_type="TIMEOUT".
+6. oversized output is handled deterministically.
+7. artifact_written is recorded.
+8. state_completed is recorded after captured command failure.
+9. state_completed is not recorded if artifact append fails.
+10. validate_chain() still succeeds.
+11. shell=True is never used.
+12. CommandResult uses typed results.
+
+Explicitly Deferred
+
+* sandboxing
+* environment isolation
+* secret filtering
+* OpenAI adapter
+* Claude adapter
+* Gemini adapter
+* MCP
+* routing
+* quotas
+* retries
+* memory
+* parallel execution
+* prompt generation
+* agent loops
+
+Definition of Done
+
+Leira can execute a shell command and record the result honestly.
+
+A failed command is not a failed kernel.
+
+The machine preserves what happened.
+
+Remember:
+
+The first external intelligence invited into the workshop is the operating system.
+
+Not another mind.

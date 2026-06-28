@@ -1,0 +1,526 @@
+Implement Leira v1.6: Session Bundles
+
+Mission
+
+Extend Leira from a machine that records individual intents into a machine that can correlate related work.
+
+The goal is not orchestration.
+
+The goal is not planning.
+
+The goal is not project management.
+
+The goal is to prove that multiple intents, receipts, artifacts, and provenance snapshots can be grouped into a higher-level evidence set without changing the underlying truth model.
+
+The machine must be able to say:
+
+> These intents belonged to the same session.
+>
+> These receipts belong together.
+>
+> These artifacts belong together.
+>
+> These provenance snapshots belong together.
+>
+> Here is the evidence.
+>
+> No execution order was enforced.
+
+Nothing more.
+
+Hard Constraints
+
+* Python only.
+* SQLite only.
+* Single process only.
+* Blocking only.
+* Library, not service.
+* No threads.
+* No async.
+* No daemon.
+* No retries.
+* No scheduler.
+* No orchestration.
+* No dependency graphs.
+* No planning.
+* No project hierarchy.
+* No priorities.
+* No memory.
+* No background tasks.
+* No LLM calls.
+* No agent loops.
+* No remove API.
+* No reorder API.
+
+Do not redesign:
+
+* ledger
+* lifecycle
+* inbox
+* dispatcher
+* registry
+* claims
+* receipts
+* workspace
+* provenance
+* auditor
+
+Adapt existing structure minimally.
+
+Files
+
+```text
+leira/
+  sessions/
+    sessions.py
+    test_sessions.py
+```
+
+Mission
+
+Sessions organize evidence.
+
+Sessions do not execute work.
+
+Sessions do not create dependencies.
+
+Sessions do not imply causality.
+
+Sessions expose relationships.
+
+Nothing more.
+
+Session Bundle
+
+Implement:
+
+```python
+@dataclass(frozen=True)
+class SessionBundle:
+    session_id: str
+    created_at: str
+    intent_ids: list[str]
+```
+
+Rules
+
+Sessions are views.
+
+Sessions are additive.
+
+Sessions do not own truth.
+
+Intents remain independent.
+
+The ledger remains authoritative.
+
+Session API
+
+Implement:
+
+```python
+create_session() -> SessionBundle
+```
+
+Implement:
+
+```python
+add_intent_to_session(
+    session_id: str,
+    intent_id: str
+)
+```
+
+Implement:
+
+```python
+get_session(
+    session_id: str
+) -> SessionBundle | None
+```
+
+Implement:
+
+```python
+list_session_intents(
+    session_id: str
+) -> list[str]
+```
+
+Session Events
+
+Creation appends:
+
+```text
+session_created
+```
+
+Adding an intent appends:
+
+```text
+session_intent_added
+```
+
+Rejected additions append:
+
+```text
+session_intent_rejected
+```
+
+Artifact Schema
+
+```python
+{
+    "type": "session_membership",
+    "content": {
+        "session_id": "...",
+        "intent_id": "...",
+        "error_type": None
+    }
+}
+```
+
+Membership Rules
+
+Intent membership is additive.
+
+No remove API.
+
+No reorder API.
+
+No dependency API.
+
+Duplicate membership returns:
+
+```text
+DUPLICATE_MEMBERSHIP
+```
+
+Unknown session returns:
+
+```text
+UNKNOWN_SESSION
+```
+
+Unknown intent returns:
+
+```text
+UNKNOWN_INTENT
+```
+
+Kernel Rules
+
+Sessions do not:
+
+* imply execution order
+* enforce execution order
+* imply dependencies
+* imply causality
+* imply priority
+* imply ownership
+* imply orchestration
+
+Sessions only group.
+
+Receipt Integration
+
+Implement:
+
+```python
+get_session_receipts(
+    session_id: str
+) -> list[ReceiptBundle]
+```
+
+Return receipt bundles in session membership order.
+
+Do not sort by timestamps.
+
+Do not execute logic.
+
+This should be a mechanical lookup using:
+
+```text
+session_membership_projection
+receipt_projection
+ledger events
+```
+
+Artifact Integration
+
+Implement:
+
+```python
+get_session_artifacts(
+    session_id: str
+) -> list[ArtifactDescriptor]
+```
+
+Return artifact descriptors for member intents in membership order.
+
+Do not inspect file contents.
+
+Do not hash files here.
+
+Auditing verifies bytes elsewhere.
+
+Provenance Integration
+
+Implement:
+
+```python
+get_session_provenance(
+    session_id: str
+) -> list[ProvenanceSnapshot]
+```
+
+Return provenance snapshots for member intents in membership order.
+
+Do not inspect current repositories.
+
+Historical provenance lives in the ledger.
+
+Projection
+
+Create:
+
+```text
+session_projection
+```
+
+Fields:
+
+```python
+session_id
+intent_count
+created_at
+last_event_id
+```
+
+Create:
+
+```text
+session_membership_projection
+```
+
+Fields:
+
+```python
+session_id
+intent_id
+membership_order
+created_at
+last_event_id
+```
+
+Rules
+
+created_at derives from ledger timestamps.
+
+membership_order derives from ledger order.
+
+membership_order is an incrementing integer per session_id.
+
+Never use:
+
+```python
+datetime.now()
+```
+
+during rebuild.
+
+Projection Rebuild
+
+Scan ledger events chronologically:
+
+```text
+session_created
+session_intent_added
+```
+
+For each:
+
+```text
+session_intent_added
+```
+
+calculate:
+
+```python
+membership_order = current_count_for_session + 1
+```
+
+Rebuild must be:
+
+* deterministic
+* idempotent
+* transactional
+
+Deleting projections loses no truth.
+
+Audit Extension
+
+Verify:
+
+* session_projection matches ledger
+* session_membership_projection matches ledger
+* membership_order is preserved exactly
+* membership_order is derived from ledger order
+* duplicate memberships detected
+* unknown session references detected
+* unknown intent references detected
+* receipt membership queries match session members
+* artifact membership queries match session members
+* provenance membership queries match session members
+
+Audit remains read-only.
+
+Audit reports disagreement.
+
+It does not repair.
+
+Failure Model
+
+Sessions are convenience.
+
+Session projections are a table of contents.
+
+Deleting projections loses query convenience.
+
+It does not lose work.
+
+Session corruption is recoverable.
+
+Ledger corruption is not.
+
+Stress Test
+
+Create:
+
+```text
+10 sessions
+```
+
+Add:
+
+```text
+100 intents
+```
+
+Verify:
+
+* membership order preserved
+* receipts grouped correctly
+* artifacts grouped correctly
+* provenance grouped correctly
+* projections rebuild correctly
+* audit passes
+
+Tests
+
+Required tests
+
+1. session creation succeeds.
+2. intent addition succeeds.
+3. duplicate membership rejected.
+4. unknown session rejected.
+5. unknown intent rejected.
+6. session_created event recorded.
+7. session_intent_added recorded.
+8. session_intent_rejected recorded.
+9. session membership order preserved.
+10. membership_order increments per session_id.
+11. membership_order derives from ledger order.
+12. receipt retrieval succeeds.
+13. receipt retrieval uses membership order.
+14. artifact retrieval succeeds.
+15. artifact retrieval uses membership order.
+16. provenance retrieval succeeds.
+17. provenance retrieval uses membership order.
+18. retrieval methods do not execute extra logic.
+19. projection rebuilt correctly.
+20. created_at derived from ledger timestamps.
+21. rebuild deterministic.
+22. rebuild idempotent.
+23. projection loss recoverable.
+24. audit validates sessions.
+25. audit detects duplicate memberships.
+26. audit detects unknown session references.
+27. audit detects unknown intent references.
+28. audit remains read-only.
+29. validate_chain() still succeeds.
+30. session grouping does not imply execution order.
+31. no remove API exists.
+32. no reorder API exists.
+33. no dependency graph exists.
+34. 100-intent stress test passes.
+
+Explicitly Deferred
+
+* projects
+* DAGs
+* dependencies
+* orchestration
+* priorities
+* scheduling
+* retries
+* memory
+* planning
+* project management
+* execution ordering
+* session mutation
+* OpenAI
+* Claude
+* Gemini
+* MCP
+* agent loops
+
+Definition of Done
+
+Leira can group work without controlling work.
+
+Intents remain independent.
+
+Receipts remain truthful.
+
+Artifacts remain evidence.
+
+Provenance remains historical.
+
+Sessions expose relationships.
+
+Sessions are correlation.
+
+Not orchestration.
+
+Remember:
+
+Workers think.
+
+Kernel gates.
+
+Ledger remembers.
+
+Projections serve.
+
+Auditors verify.
+
+Intent enters.
+
+Dispatch happens.
+
+Workers are named.
+
+Claims establish ownership.
+
+Receipts preserve evidence.
+
+Files preserve bytes.
+
+Git preserves provenance.
+
+Sessions preserve relationships.
+
+Build the session.
+
+Do not build the project manager.

@@ -1,0 +1,521 @@
+Implement Leira v1.3: Receipt Bundles
+
+Mission
+
+Extend Leira from a machine that records events into a machine that can package evidence.
+
+The goal is not reporting.
+
+The goal is not summarization.
+
+The goal is not explanation.
+
+The goal is to prove that every event associated with one intent can be exposed as a deterministic, complete receipt bundle.
+
+The machine must be able to say:
+
+> This intent existed.
+>
+> It was claimed or rejected.
+>
+> A worker executed or failed to execute.
+>
+> Artifacts were written.
+>
+> The intent completed, failed, or remains in progress.
+>
+> Here are the receipts that prove it.
+
+Nothing more.
+
+Hard Constraints
+
+* Python only.
+* SQLite only.
+* Single process only.
+* Blocking only.
+* Library, not service.
+* No threads.
+* No async.
+* No daemon.
+* No retries.
+* No scheduler.
+* No routing.
+* No memory.
+* No background tasks.
+* No summaries.
+* No explanations.
+* No reports.
+* No compression.
+* No LLM calls.
+* No agent loops.
+
+Do not redesign:
+
+* ledger
+* lifecycle
+* inbox
+* dispatcher
+* registry
+* claim store
+* projection engine
+* auditor
+
+Adapt existing structure minimally.
+
+Files
+
+```text
+leira/
+  receipts/
+    receipts.py
+    test_receipts.py
+```
+
+Mission
+
+Receipts organize history.
+
+Receipts do not interpret history.
+
+Receipts do not compress history.
+
+Receipts expose witnesses.
+
+Nothing more.
+
+Receipt Bundle
+
+Use the existing LedgerEvent dataclass from the ledger module.
+
+Implement:
+
+```python
+@dataclass(frozen=True)
+class ReceiptBundle:
+    intent_id: str
+    first_event_id: str
+    last_event_id: str
+    event_count: int
+    events: list[LedgerEvent]
+```
+
+Rules
+
+Receipt bundles are views.
+
+Receipt bundles contain ledger events.
+
+Receipt bundles do not own truth.
+
+Ledger remains authoritative.
+
+Receipt API
+
+Implement:
+
+```python
+get_receipt_bundle(
+    intent_id: str
+) -> ReceiptBundle | None
+```
+
+Implement:
+
+```python
+list_receipt_events(
+    intent_id: str
+) -> list[LedgerEvent]
+```
+
+Implement:
+
+```python
+export_receipt_bundle(
+    intent_id: str
+) -> dict
+```
+
+Source of Truth Rule
+
+`list_receipt_events` must query the ledger directly by:
+
+```python
+intent_id
+```
+
+Do not read events from receipt_projection.
+
+The projection may be used for verification.
+
+It must not be the source of bundle events.
+
+Chronology Rules
+
+Events must appear in ledger order.
+
+Never sort receipt events by timestamp.
+
+Use ledger ordering only.
+
+History outranks clocks.
+
+Timestamps may collide.
+
+Ledger order is truth.
+
+Receipt Scope
+
+Receipt bundle includes all ledger events sharing:
+
+```python
+intent_id
+```
+
+Examples:
+
+```text
+intent_submitted
+intent_rejected
+intent_claimed
+intent_claim_rejected
+state_running
+artifact_written
+intent_completed
+intent_failed
+intent_released
+intent_release_rejected
+```
+
+Rejected events are included.
+
+Failure events are included.
+
+In-progress events are included.
+
+Nothing is hidden.
+
+Bundle Invariants
+
+For a bundle:
+
+```python
+first_event_id
+```
+
+must equal the first event in ledger order.
+
+```python
+last_event_id
+```
+
+must equal the last event in ledger order.
+
+```python
+event_count
+```
+
+must equal:
+
+```python
+len(events)
+```
+
+If an intent is still in progress:
+
+* bundle still exists
+* last_event_id is the most recent event
+* no terminal state is required
+
+If an intent is completed or failed:
+
+* last_event_id should correspond to the most recent event after terminal handling
+* audit should detect illegal events after terminal state
+
+Export Determinism
+
+Export format must be deterministic.
+
+Use canonical JSON serialization:
+
+```python
+json.dumps(
+    export,
+    sort_keys=True,
+    separators=(",", ":")
+)
+```
+
+Exporting the same bundle twice must produce byte-identical JSON.
+
+Receipt Projection
+
+Create:
+
+```text
+receipt_projection
+```
+
+Fields:
+
+```python
+intent_id
+first_event_id
+last_event_id
+event_count
+updated_at
+```
+
+Projection is derived.
+
+`updated_at` must come from the timestamp of:
+
+```python
+last_event_id
+```
+
+Never use:
+
+```python
+datetime.now()
+```
+
+during rebuild.
+
+Projection Rebuild
+
+Extend rebuild logic to reconstruct:
+
+```text
+receipt_projection
+```
+
+from ledger events.
+
+Rebuild algorithm:
+
+1. scan ledger events in ledger order
+2. group by intent_id
+3. preserve first event encountered as first_event_id
+4. preserve most recent ledger event as last_event_id
+5. count all events for that intent
+6. set updated_at from the last event timestamp
+
+Rebuild must be:
+
+* deterministic
+* idempotent
+* transactional
+
+SQL aggregation is allowed only if it preserves ledger order correctly.
+
+Do not assume:
+
+```sql
+MIN(id)
+MAX(id)
+MAX(created_at)
+```
+
+are equivalent to ledger order unless the existing schema guarantees that.
+
+Ledger order wins.
+
+Audit Extension
+
+Extend audit to verify:
+
+* receipt bundles contain all ledger events for intent_id
+* event_count matches ledger count
+* first_event_id matches first ledger event for intent_id
+* last_event_id matches last ledger event for intent_id
+* receipt projection matches ledger
+* updated_at equals timestamp of last ledger event
+* chronology is preserved
+* in-progress intents are handled
+* completed and failed intents are handled
+* rejected and failure events are not omitted
+* illegal events after terminal state are reported elsewhere by lifecycle audit
+
+Audit remains read-only.
+
+Audit reports disagreement.
+
+It does not repair.
+
+Bundle Completeness Check
+
+Auditor must verify that for each intent_id:
+
+```python
+receipt_projection.event_count
+```
+
+equals:
+
+```python
+COUNT(*)
+```
+
+of ledger events for that intent.
+
+No ghost events.
+
+No missing events.
+
+No hidden omissions.
+
+Kernel Rules
+
+Receipts do not:
+
+* summarize
+* interpret
+* explain
+* compress
+* score
+* reorder events
+* judge worker outputs
+* decide success
+
+Receipts preserve chronology.
+
+Receipts expose witnesses.
+
+Stress Tests
+
+Execute or create:
+
+```text
+100 intents
+```
+
+Generate:
+
+```text
+100 receipt bundles
+```
+
+Verify:
+
+* completed bundles work
+* failed bundles work
+* rejected bundles work
+* in-progress bundles work
+* projections rebuild correctly
+* audit passes
+
+Export Test
+
+Export the same bundle twice.
+
+Serialize both using canonical JSON.
+
+Verify byte-identical output.
+
+Determinism matters.
+
+Tests
+
+Required tests
+
+1. bundle created for completed intent.
+2. bundle created for failed intent.
+3. bundle created for rejected intent.
+4. bundle created for in-progress intent.
+5. rejected events included.
+6. failure events included.
+7. claim events included.
+8. release events included.
+9. first_event_id correct by ledger order.
+10. last_event_id correct by ledger order.
+11. event_count equals len(events).
+12. event_count equals ledger COUNT(*).
+13. chronology preserved.
+14. ledger ordering used instead of timestamps.
+15. list_receipt_events queries ledger directly.
+16. receipt_projection is not source of events.
+17. export deterministic.
+18. repeated export byte-identical.
+19. projection rebuilt correctly.
+20. projection loss recoverable.
+21. updated_at derived from last event timestamp.
+22. rebuild deterministic.
+23. rebuild idempotent.
+24. audit validates receipt projection.
+25. audit detects receipt event_count mismatch.
+26. audit detects first_event_id mismatch.
+27. audit detects last_event_id mismatch.
+28. audit detects updated_at mismatch.
+29. bundle does not omit failures.
+30. bundle does not omit rejected events.
+31. bundle uses LedgerEvent dataclass.
+32. bundle uses ledger events only.
+33. validate_chain() still succeeds.
+34. audit remains read-only.
+35. 100-bundle stress test passes.
+
+Explicitly Deferred
+
+* summaries
+* reports
+* dashboards
+* analytics
+* compression
+* scoring
+* search
+* vector databases
+* embeddings
+* OpenAI
+* Claude
+* Gemini
+* MCP
+* agent loops
+* external verification signatures
+* receipt signing
+
+Definition of Done
+
+Leira can expose complete intent history as first-class receipt bundles.
+
+Truth remains in the ledger.
+
+Receipts are deterministic views.
+
+Failures are visible.
+
+Rejected events are visible.
+
+In-progress work is visible.
+
+Nothing is hidden.
+
+The system does not explain itself.
+
+It provides evidence.
+
+Remember:
+
+Workers think.
+
+Kernel gates.
+
+Ledger remembers.
+
+Projections serve.
+
+Auditors verify.
+
+Intent enters.
+
+Dispatch happens.
+
+Workers are named.
+
+Claims establish ownership.
+
+Receipts preserve evidence.
+
+Build the receipts.
+
+Do not build the story.

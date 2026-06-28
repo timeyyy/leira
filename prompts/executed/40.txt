@@ -1,0 +1,298 @@
+# Leira v4.0 — Dispatcher Kernel
+
+## Mission
+
+Implement the first deterministic **Dispatcher Kernel**.
+
+This is **not** an execution engine.
+
+This is **not** a planner.
+
+This is **not** autonomous.
+
+Its sole responsibility is to validate a committed DispatchRecord and return a deterministic DispatchPlan describing exactly what would be executed.
+
+It never performs execution.
+
+It never invokes tools.
+
+It never spawns processes.
+
+It never mutates project state.
+
+It is the final deterministic boundary before the outside world.
+
+---
+
+## Files
+
+Create:
+
+```text
+leira/dispatcher_kernel/
+    __init__.py
+    dispatcher.py
+    test_dispatcher_kernel.py
+```
+
+Modify nothing else unless strictly necessary.
+
+---
+
+## Public API
+
+Create immutable dataclasses.
+
+```text
+DispatchPlan
+```
+
+Fields:
+
+```text
+dispatch_id
+
+subject_id
+
+subject_kind
+
+dispatch_type
+
+target_label
+
+execution_mode
+
+reason_codes
+
+dispatch_summary
+```
+
+```text
+DispatcherKernelResult
+```
+
+Fields:
+
+```text
+dispatch_record
+
+dispatch_plan
+```
+
+No generated identifiers.
+
+No timestamps.
+
+No clocks.
+
+No UUIDs.
+
+No randomness.
+
+---
+
+## Functions
+
+Implement:
+
+```text
+build_dispatch_plan(...)
+```
+
+Input:
+
+```text
+DispatchRecord
+```
+
+Returns:
+
+```text
+DispatchPlan
+```
+
+No inference.
+
+No modification.
+
+Pure field extraction.
+
+---
+
+Implement:
+
+```text
+run_dispatcher_kernel(...)
+```
+
+Input:
+
+```text
+DispatchRecord
+```
+
+Returns:
+
+```text
+DispatcherKernelResult
+```
+
+The kernel:
+
+1. validates the supplied DispatchRecord
+2. builds the DispatchPlan
+3. returns the result
+
+Nothing else.
+
+---
+
+Implement:
+
+```text
+dispatcher_kernel_markdown(...)
+```
+
+Returns deterministic markdown.
+
+---
+
+Implement:
+
+```text
+write_dispatcher_kernel(...)
+```
+
+Writes:
+
+```text
+.leira/dispatcher_kernel/<dispatch_id>.dispatch_plan.md
+```
+
+Derived output only.
+
+---
+
+## Markdown
+
+```text
+# Dispatcher Kernel
+
+## Dispatch Record
+
+...
+
+## Dispatch Plan
+
+...
+
+## Provenance Notice
+
+This kernel prepares deterministic execution plans.
+
+It performs no execution, planning, scheduling, approval or dispatch.
+```
+
+Section order must never vary.
+
+---
+
+## Determinism Requirements
+
+Same DispatchRecord
+
+↓
+
+same DispatchPlan
+
+↓
+
+same DispatcherKernelResult
+
+↓
+
+same markdown
+
+↓
+
+same file bytes
+
+No sorting.
+
+No hidden state.
+
+No repository scanning.
+
+No filesystem inspection.
+
+No ledger access.
+
+No randomness.
+
+No timestamps.
+
+---
+
+## Tests
+
+Create comprehensive pytest coverage.
+
+Verify:
+
+- immutable dataclasses
+- deterministic plan creation
+- deterministic kernel execution
+- deterministic markdown
+- deterministic file output
+- DispatchRecord preserved exactly
+- DispatchPlan preserved exactly
+- byte-identical repeated rendering
+- byte-identical repeated writes
+- byte-identical repeated execution
+- no repository scanning
+- no filesystem inspection
+- no ledger access
+- no project-state mutation
+- no planner
+- no execution
+- no subprocess
+- no shell commands
+- no scheduling
+- no worker invocation
+- no AI calls
+- no browser automation
+- no clocks
+- no timestamps
+- no UUIDs
+- no randomness
+
+---
+
+## Explicit Guardrails
+
+Do not implement:
+
+- execution
+- subprocess
+- shell commands
+- worker invocation
+- scheduling
+- planner
+- orchestration
+- browser automation
+- AI adapters
+- CLI
+- repository loading
+- policy loading
+- database
+- project-state mutation
+
+---
+
+## Steward's Law
+
+Keep it boring.
+
+The Dispatcher Kernel defines exactly what would be dispatched.
+
+Only a later execution layer may actually perform the dispatch.

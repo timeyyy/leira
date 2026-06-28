@@ -1,0 +1,261 @@
+Leira v1.13 — Review Record
+Mission
+
+Implement the deterministic Review Record slice.
+
+The purpose of this slice is to preserve reviewer responses as immutable evidence.
+
+This is not prompt revision.
+
+This is not approval.
+
+This is not dispatch.
+
+This is simply recording exactly what a reviewer said so later deterministic stages can reason from explicit evidence rather than hidden conversation.
+
+The lifecycle becomes:
+
+Project State
+↓
+
+Prompt Draft
+↓
+
+Knowledge Gap
+↓
+
+Review Question
+↓
+
+Review Record
+Architectural Review
+
+Leira currently knows how to generate uncertainty and ask targeted questions.
+
+It does not yet know how to preserve the answers.
+
+This slice closes that gap.
+
+A Review Record is evidence.
+
+It does not imply correctness.
+
+It does not imply agreement.
+
+It does not imply approval.
+
+It merely preserves provenance.
+
+Remember:
+
+Humans decide.
+
+Guest minds suggest.
+
+The kernel remembers.
+
+This slice implements "the kernel remembers."
+
+Files
+
+Create:
+
+leira/review_record/
+    __init__.py
+    review_record.py
+    test_review_record.py
+
+Modify nothing else unless strictly necessary.
+
+Public API
+
+Create immutable dataclasses.
+
+ReviewRecord
+
+Fields:
+
+review_id
+
+draft_id
+
+review_question_id
+
+reviewer_label
+
+response_text
+
+source_label
+
+reason_codes
+
+attachments
+
+
+All fields are caller supplied.
+
+No generated identifiers.
+
+No timestamps.
+
+No clocks.
+
+No UUIDs.
+
+No randomness.
+
+Functions
+
+Implement:
+
+create_review_record(...)
+
+Returns immutable ReviewRecord.
+
+Implement:
+
+review_record_markdown(...)
+
+Returns deterministic markdown.
+
+Implement:
+
+write_review_record(...)
+
+Optional derived scratch writer.
+
+Writes:
+
+.leira/review_records/<review_id>.review.md
+
+This is derived output only.
+
+Markdown Format
+
+Render:
+
+# Review Record
+
+## Review ID
+
+...
+
+## Draft ID
+
+...
+
+## Review Question
+
+...
+
+## Reviewer
+
+...
+
+## Source
+
+...
+
+## Reason Codes
+
+...
+
+## Response
+
+...
+
+## Attachments
+
+...
+
+## Provenance Notice
+
+This record preserves reviewer evidence exactly as supplied.
+It performs no interpretation, approval, reconciliation or revision.
+
+Section order must never vary.
+
+Determinism Requirements
+
+Same inputs
+
+↓
+
+same object
+
+↓
+
+same markdown
+
+↓
+
+same file bytes
+
+No sorting.
+
+No inference.
+
+No normalization beyond existing Leira conventions.
+
+Preserve reviewer labels exactly.
+
+Preserve response text exactly.
+
+Preserve reason code ordering exactly.
+
+Tests
+
+Create comprehensive pytest coverage.
+
+Verify:
+
+immutable dataclass
+deterministic object creation
+deterministic markdown
+byte-identical repeated rendering
+byte-identical repeated file output
+reviewer preserved exactly
+response preserved exactly
+reason code ordering preserved
+attachment ordering preserved
+no clocks
+no timestamps
+no UUIDs
+no randomness
+no ledger mutation
+no dispatcher imports
+no prompt revision
+no approval logic
+no rejection logic
+no semantic analysis
+no reviewer invocation
+Explicit Guardrails
+
+Do not implement:
+
+prompt revision
+prompt rewriting
+approval
+rejection
+voting
+reconciliation
+semantic analysis
+reviewer selection
+reviewer discovery
+AI calls
+adapters
+dispatcher integration
+CLI
+ledger persistence
+database
+orchestration
+autonomous behaviour
+Steward's Law
+
+Keep it boring.
+
+This slice exists solely to preserve review evidence as immutable deterministic data.
+
+The kernel should know what reviewers said, but absolutely nothing about whether they were right.
+
+The next slice will build on this evidence to create immutable Prompt Revision Records.

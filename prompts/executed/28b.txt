@@ -1,0 +1,274 @@
+# Leira v1.17 — Implementation Report Record
+
+## Mission
+
+Implement the deterministic **Implementation Report Record** slice.
+
+This slice preserves the report returned after an implementation attempt.
+
+It does **not** verify the report.
+
+It does **not** approve the implementation.
+
+It does **not** execute anything.
+
+It does **not** infer whether the work succeeded.
+
+It merely records what the implementer reported.
+
+The lifecycle becomes:
+
+```text
+Human Decision Record
+↓
+
+Dispatch Record
+↓
+
+Implementation Report Record
+```
+
+---
+
+# Architectural Review
+
+Leira now records intended dispatches.
+
+But before Leira has a real dispatcher or execution engine, implementation still happens outside the kernel.
+
+The next evidence object should therefore capture the result of that external implementation attempt.
+
+An Implementation Report Record says:
+
+> "This is what the implementer claimed was done."
+
+Nothing more.
+
+Verification remains a separate later slice.
+
+---
+
+# Files
+
+Create:
+
+```text
+leira/implementation_report/
+    __init__.py
+    report.py
+    test_implementation_report.py
+```
+
+Modify nothing else unless strictly necessary.
+
+---
+
+# Public API
+
+Create immutable dataclass:
+
+```text
+ImplementationReport
+```
+
+Fields:
+
+```text
+report_id
+dispatch_id
+implementer_label
+source_label
+files_created
+files_modified
+files_deleted
+commands_run
+reported_results
+reported_blockers
+reason_codes
+report_body
+```
+
+All fields are caller supplied.
+
+No generated identifiers.
+
+No timestamps.
+
+No clocks.
+
+No UUIDs.
+
+No randomness.
+
+All sequence fields must preserve caller ordering exactly.
+
+---
+
+# Functions
+
+Implement:
+
+```text
+create_implementation_report(...)
+```
+
+Returns immutable ImplementationReport.
+
+Implement:
+
+```text
+implementation_report_markdown(...)
+```
+
+Returns deterministic markdown.
+
+Implement:
+
+```text
+write_implementation_report(...)
+```
+
+Optional derived scratch writer.
+
+Writes:
+
+```text
+.leira/implementation_reports/<report_id>.implementation.md
+```
+
+Derived output only.
+
+---
+
+# Markdown Format
+
+Render:
+
+```text
+# Implementation Report Record
+
+## Report ID
+
+...
+
+## Dispatch
+
+...
+
+## Implementer
+
+...
+
+## Source
+
+...
+
+## Files Created
+
+...
+
+## Files Modified
+
+...
+
+## Files Deleted
+
+...
+
+## Commands Run
+
+...
+
+## Reported Results
+
+...
+
+## Reported Blockers
+
+...
+
+## Reason Codes
+
+...
+
+## Report Body
+
+...
+
+## Provenance Notice
+
+This record preserves an implementation report as evidence.
+
+It does not verify, approve, execute, reconcile or infer success.
+```
+
+Section order must never vary.
+
+---
+
+# Tests
+
+Verify:
+
+* immutable dataclass
+* deterministic object creation
+* deterministic markdown
+* deterministic file output
+* byte-identical repeated writes
+* implementer_label preserved exactly
+* source_label preserved exactly
+* files_created ordering preserved exactly
+* files_modified ordering preserved exactly
+* files_deleted ordering preserved exactly
+* commands_run ordering preserved exactly
+* reported_results ordering preserved exactly
+* reported_blockers ordering preserved exactly
+* reason_codes ordering preserved exactly
+* report_body preserved exactly
+* no clocks
+* no timestamps
+* no UUIDs
+* no randomness
+* no generated identifiers
+* no verification logic
+* no approval logic
+* no execution
+* no subprocess
+* no dispatcher execution
+* no planner
+* no AI calls
+* no ledger mutation
+* no project-state mutation
+
+---
+
+# Explicit Guardrails
+
+Do not implement:
+
+* verification
+* test interpretation
+* success inference
+* approval
+* rejection
+* execution
+* subprocess
+* shell commands
+* dispatcher execution
+* planner
+* CLI
+* AI adapters
+* browser automation
+* ledger persistence
+* database
+* project-state mutation
+
+---
+
+# Steward's Law
+
+Keep it boring.
+
+The kernel may preserve what the implementer claimed.
+
+The kernel must not decide whether the claim is true.

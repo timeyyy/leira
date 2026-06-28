@@ -1,0 +1,560 @@
+Implement Leira v1.5: Git Provenance
+
+Mission
+
+Extend Leira from a machine that stores evidence into a machine that records the source state behind evidence.
+
+The goal is not version control.
+
+The goal is not source management.
+
+The goal is not synchronization.
+
+The goal is to prove that artifacts can be tied to the repository state that existed before execution began.
+
+The machine must be able to say:
+
+> These artifacts were produced.
+>
+> This source state existed before execution.
+>
+> This commit was active.
+>
+> The repository was clean or dirty.
+>
+> Provenance was captured or provenance capture failed.
+>
+> Here is the evidence linking intent, execution, artifacts, and source.
+
+Nothing more.
+
+Hard Constraints
+
+* Python only.
+* SQLite only.
+* Local filesystem only.
+* Git only.
+* Single process only.
+* Blocking only.
+* Library, not service.
+* No threads.
+* No async.
+* No daemon.
+* No git add.
+* No git commit.
+* No git push.
+* No git pull.
+* No git fetch.
+* No git mutation.
+* No retries.
+* No scheduler.
+* No background tasks.
+* No file watching.
+* No current-state audit against repository.
+* No LLM calls.
+* No agent loops.
+
+Do not redesign:
+
+* ledger
+* lifecycle
+* inbox
+* dispatcher
+* registry
+* claim store
+* receipts
+* workspace
+* auditor
+* git adapter
+
+Adapt existing structure minimally.
+
+Files
+
+```text
+leira/
+  provenance/
+    git_provenance.py
+    test_git_provenance.py
+```
+
+Mission
+
+Artifacts preserve bytes.
+
+Git provenance preserves source state.
+
+Receipts connect them.
+
+The repository may change later.
+
+The ledger preserves what was observed then.
+
+Nothing more.
+
+Provenance Snapshot
+
+Implement:
+
+```python
+@dataclass(frozen=True)
+class ProvenanceSnapshot:
+    snapshot_id: str
+    intent_id: str
+    repo_path: str
+    head_sha: str | None
+    branch: str | None
+    is_dirty: bool | None
+    status_porcelain: str
+    created_at: str
+    error_type: str | None = None
+    stderr: str = ""
+```
+
+Rules
+
+Snapshots are immutable.
+
+Git is observed.
+
+Not modified.
+
+Git state is evidence.
+
+Not truth itself.
+
+Ledger remains truth.
+
+Store:
+
+```python
+status_porcelain
+```
+
+exactly as Git returned it.
+
+Do not parse.
+
+Do not filter.
+
+Do not reinterpret.
+
+Snapshot API
+
+Implement:
+
+```python
+capture_provenance(
+    intent_id: str,
+    repo_path: str
+) -> ProvenanceSnapshot
+```
+
+Implement:
+
+```python
+get_provenance(
+    snapshot_id: str
+) -> ProvenanceSnapshot | None
+```
+
+Reuse:
+
+```python
+inspect_repo()
+```
+
+from the existing Git adapter.
+
+Do not duplicate subprocess logic.
+
+Snapshot Timing
+
+Capture provenance immediately before worker execution.
+
+This represents:
+
+```text
+source state at execution start
+```
+
+Do not capture after execution.
+
+Do not update snapshots after execution.
+
+Worker side-effects are irrelevant to the captured source state.
+
+Historical truth outranks current state.
+
+Successful Capture Event
+
+Successful capture appends:
+
+```text
+provenance_captured
+```
+
+Artifact schema:
+
+```python
+{
+    "type": "provenance",
+    "content": {
+        "snapshot_id": "...",
+        "intent_id": "...",
+        "repo_path": "...",
+        "head_sha": "...",
+        "branch": "...",
+        "is_dirty": false,
+        "status_porcelain": "",
+        "error_type": None,
+        "stderr": ""
+    }
+}
+```
+
+Failed Capture Event
+
+If Git inspection fails:
+
+append:
+
+```text
+provenance_capture_failed
+```
+
+Artifact schema:
+
+```python
+{
+    "type": "provenance",
+    "content": {
+        "snapshot_id": "...",
+        "intent_id": "...",
+        "repo_path": "...",
+        "head_sha": None,
+        "branch": None,
+        "is_dirty": None,
+        "status_porcelain": "",
+        "error_type": "NOT_REPOSITORY",
+        "stderr": "..."
+    }
+}
+```
+
+Rules for failure:
+
+* failed capture is history
+* failed capture is not hidden
+* failed capture prevents worker execution
+* do not proceed to dispatch if provenance could not be captured
+* return typed failure
+
+Suggested errors:
+
+```text
+NOT_REPOSITORY
+GIT_NOT_FOUND
+TIMEOUT
+UNEXPECTED
+STORAGE_FAILURE
+```
+
+Dispatcher Integration
+
+Add provenance capture as a pre-execution step.
+
+Sequence:
+
+1. intent is claimed
+2. provenance is captured
+3. if provenance capture fails:
+   * append provenance_capture_failed
+   * mark intent_failed
+   * release claim if possible
+   * do not invoke worker
+4. if provenance capture succeeds:
+   * append provenance_captured
+   * invoke worker
+   * continue normal dispatch flow
+
+Provenance failure is not worker failure.
+
+It is execution precondition failure.
+
+Kernel Rules
+
+The kernel does not:
+
+* interpret branches
+* judge dirty repositories
+* require clean repositories
+* reject dirty repositories
+* compare commits
+* inspect diffs
+* audit against current repo state
+
+It records:
+
+* commit
+* branch
+* dirty flag
+* porcelain output
+* capture error if any
+
+Nothing more.
+
+Dirty Repository Rule
+
+Dirty repositories are allowed.
+
+Clean repositories are allowed.
+
+The system records dirtiness.
+
+It does not judge it.
+
+Receipt Integration
+
+Receipt bundles should include:
+
+```python
+ProvenanceSnapshot
+```
+
+references or embedded structured snapshot metadata.
+
+Receipts should answer:
+
+```text
+What source state was observed before execution?
+```
+
+Not:
+
+```text
+Was that state good?
+```
+
+Projection
+
+Create:
+
+```text
+provenance_projection
+```
+
+Fields:
+
+```python
+snapshot_id
+intent_id
+repo_path
+head_sha
+branch
+is_dirty
+status_porcelain
+created_at
+error_type
+last_event_id
+```
+
+Projection is derived.
+
+created_at comes from ledger timestamps.
+
+Never use:
+
+```python
+datetime.now()
+```
+
+during rebuild.
+
+Projection Rebuild
+
+Scan:
+
+```text
+provenance_captured
+provenance_capture_failed
+```
+
+events.
+
+Rebuild must be:
+
+* deterministic
+* idempotent
+* transactional
+
+Successful and failed provenance events both appear in projection.
+
+Audit Extension
+
+Verify:
+
+* provenance projection matches ledger
+* captured head_sha matches captured event
+* branch matches captured event
+* dirty flag matches captured event
+* status_porcelain matches captured event exactly
+* failed captures preserve error_type
+* failed captures preserve stderr
+* snapshot ids are unique
+* receipts reference valid snapshots
+* provenance created_at equals ledger event timestamp
+
+Audit remains read-only.
+
+Audit does not compare against the current repository.
+
+The repository may legitimately evolve.
+
+Truth is historical.
+
+Not present state.
+
+Failure Model
+
+Repository missing after execution is acceptable.
+
+Commit deleted later is acceptable.
+
+Branch renamed later is acceptable.
+
+Repository dirty state changing later is acceptable.
+
+Provenance captures observed history.
+
+Not current reality.
+
+Stress Tests
+
+Execute or attempt:
+
+```text
+100 intents
+```
+
+Capture:
+
+```text
+100 provenance snapshots
+```
+
+Include:
+
+* clean repo
+* dirty repo
+* failed capture
+
+Verify:
+
+* rebuild succeeds
+* receipts contain provenance references
+* audit passes
+* later repository changes do not invalidate audit
+
+Tests
+
+Required tests
+
+1. provenance capture succeeds.
+2. failed provenance capture is recorded.
+3. failed provenance capture prevents worker execution.
+4. failed provenance capture marks intent_failed.
+5. claim is released after failed provenance capture where possible.
+6. head_sha preserved.
+7. branch preserved.
+8. dirty flag preserved.
+9. status_porcelain preserved exactly.
+10. dirty repositories are allowed.
+11. clean repositories are allowed.
+12. snapshot immutable.
+13. projection rebuilt correctly.
+14. failed captures included in projection.
+15. created_at derived from ledger timestamp.
+16. receipts reference provenance snapshots.
+17. snapshot ids unique.
+18. audit validates projection.
+19. audit validates failed captures.
+20. audit remains read-only.
+21. audit does not inspect current repository.
+22. rebuild deterministic.
+23. rebuild idempotent.
+24. validate_chain() still succeeds.
+25. repository changes after capture do not invalidate history.
+26. current branch changes after capture do not invalidate history.
+27. repository deletion after capture does not invalidate provenance audit.
+28. provenance uses existing git adapter.
+29. no duplicated subprocess logic.
+30. 100-snapshot stress test passes.
+
+Explicitly Deferred
+
+* git mutation
+* tags
+* diff capture
+* patch storage
+* blame
+* git add
+* git commit
+* git push
+* git pull
+* git fetch
+* submodules
+* worktrees
+* GitHub integration
+* current repository verification
+* OpenAI
+* Claude
+* Gemini
+* MCP
+* agent loops
+
+Definition of Done
+
+Leira can tie execution and artifacts to observed source state.
+
+Artifacts preserve bytes.
+
+Git provenance preserves source-state evidence.
+
+Receipts connect intent, ownership, execution, artifacts, and provenance.
+
+A failed provenance capture is recorded and prevents execution.
+
+Current repository state does not rewrite history.
+
+Nothing is hidden.
+
+Remember:
+
+Workers think.
+
+Kernel gates.
+
+Ledger remembers.
+
+Projections serve.
+
+Auditors verify.
+
+Intent enters.
+
+Dispatch happens.
+
+Workers are named.
+
+Claims establish ownership.
+
+Receipts preserve evidence.
+
+Files preserve bytes.
+
+Git preserves provenance.
+
+Build provenance.
+
+Do not build version control.

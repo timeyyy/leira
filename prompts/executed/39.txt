@@ -1,0 +1,265 @@
+# Leira v3.4 — Dispatch Commit
+
+## Mission
+
+Implement the deterministic **Dispatch Commit**.
+
+This is **not** a dispatcher.
+
+This is **not** execution.
+
+This is **not** autonomous.
+
+Its sole responsibility is to convert an explicitly approved DispatchDraft into a DispatchRecord.
+
+The commit is explicitly invoked by a human.
+
+Without an explicit commit request, nothing happens.
+
+---
+
+## Files
+
+Create:
+
+```text
+leira/dispatch_commit/
+    __init__.py
+    commit.py
+    test_dispatch_commit.py
+```
+
+Modify nothing else unless strictly necessary.
+
+---
+
+## Public API
+
+Create immutable dataclass:
+
+```text
+DispatchCommit
+```
+
+Fields:
+
+```text
+commit_id
+
+draft_id
+
+dispatch_record
+```
+
+No generated identifiers.
+
+No timestamps.
+
+No clocks.
+
+No UUIDs.
+
+No randomness.
+
+---
+
+## Functions
+
+Implement:
+
+```text
+commit_dispatch(...)
+```
+
+Inputs:
+
+```text
+DispatchDraft
+
+dispatch_id
+
+human_decision_id
+
+source_label
+
+dispatch_summary
+
+target_label
+
+execution_mode
+```
+
+Returns:
+
+```text
+DispatchCommit
+```
+
+The function shall call the existing:
+
+```text
+create_dispatch_record(...)
+```
+
+exactly once.
+
+No inference.
+
+No field modification.
+
+No additional logic.
+
+---
+
+Implement:
+
+```text
+dispatch_commit_markdown(...)
+```
+
+Returns deterministic markdown.
+
+---
+
+Implement:
+
+```text
+write_dispatch_commit(...)
+```
+
+Writes:
+
+```text
+.leira/dispatch_commits/<commit_id>.commit.md
+```
+
+Derived output only.
+
+---
+
+## Markdown
+
+```text
+# Dispatch Commit
+
+## Commit ID
+
+...
+
+## Draft
+
+...
+
+## Dispatch Record
+
+...
+
+## Provenance Notice
+
+This commit records that a human explicitly chose to convert a Dispatch Draft into a Dispatch Record.
+
+No planning, execution, approval or dispatch occurs here.
+```
+
+Section order must never vary.
+
+---
+
+## Determinism Requirements
+
+Same inputs
+
+↓
+
+same commit
+
+↓
+
+same markdown
+
+↓
+
+same file bytes
+
+No sorting.
+
+No hidden state.
+
+No inference.
+
+No repository scanning.
+
+No filesystem inspection.
+
+No ledger access.
+
+No randomness.
+
+No timestamps.
+
+---
+
+## Tests
+
+Create comprehensive pytest coverage.
+
+Verify:
+
+- immutable dataclass
+- deterministic commit creation
+- deterministic markdown
+- deterministic file output
+- byte-identical repeated rendering
+- byte-identical repeated writes
+- create_dispatch_record invoked exactly once
+- DispatchRecord preserved exactly
+- draft_id preserved exactly
+- commit_id preserved exactly
+- no repository scanning
+- no filesystem inspection
+- no ledger access
+- no project-state mutation
+- no planner
+- no dispatcher
+- no automatic dispatch
+- no automatic commit
+- no execution
+- no workflow engine
+- no AI calls
+- no browser automation
+- no subprocess
+- no shell commands
+- no clocks
+- no timestamps
+- no UUIDs
+- no randomness
+
+---
+
+## Explicit Guardrails
+
+Do not implement:
+
+- automatic dispatch
+- automatic commit
+- dispatcher
+- execution
+- planner
+- workflow engine
+- AI adapters
+- browser automation
+- CLI
+- repository loading
+- policy loading
+- database
+- project-state mutation
+
+---
+
+## Steward's Law
+
+Keep it boring.
+
+The commit exists only because a human explicitly requested it.
+
+Without explicit human invocation, no Dispatch Record is ever created.

@@ -1,0 +1,512 @@
+Implement Leira v2.0: Mind Adapter Protocol
+
+Mission
+
+Extend Leira from a machine that hosts workers into a machine that can host minds.
+
+The goal is not agents.
+
+The goal is not autonomy.
+
+The goal is not planning.
+
+The goal is to prove that an external intelligence can participate as a worker while preserving the same mechanical guarantees as every other guest.
+
+The machine must be able to say:
+
+> A request was made.
+>
+> A mind responded.
+>
+> Here is exactly what it saw.
+>
+> Here is exactly what it returned.
+>
+> The kernel does not know what it means.
+
+Nothing more.
+
+Hard Constraints
+
+* Python only.
+* SQLite only.
+* Single process only.
+* Blocking only.
+* Library, not service.
+* No threads.
+* No async.
+* No daemon.
+* No agent loops.
+* No memory.
+* No retries.
+* No planning.
+* No orchestration.
+* No routing.
+* No autonomy.
+* No prompt generation.
+* No reflection.
+* No self-improvement.
+* No recursive calls.
+* No multi-step reasoning.
+* No tool use.
+* No shell execution from minds.
+* No direct dispatcher access from minds.
+* No inbox submission from minds yet.
+* No streaming.
+* No partial response handling outside the mind adapter.
+
+Do not redesign:
+
+* ledger
+* lifecycle
+* dispatcher
+* registry
+* claims
+* receipts
+* workspace
+* provenance
+* environment
+* sessions
+* archive
+* auditor
+* worker protocol
+
+Adapt existing structure minimally.
+
+Files
+
+```text
+leira/
+  minds/
+    protocol.py
+    echo_mind.py
+    test_minds.py
+```
+
+Mission
+
+Minds are guests.
+
+Minds think.
+
+Minds do not act.
+
+The kernel remains ignorant.
+
+Meaning belongs to minds.
+
+Mechanics belong to the kernel.
+
+Nothing more.
+
+Mind Protocol
+
+Implement:
+
+```python
+class Mind(Protocol):
+
+    @property
+    def name(self) -> str:
+        ...
+
+    def invoke(
+        self,
+        request: MindRequest
+    ) -> MindResponse:
+        ...
+```
+
+MindRequest
+
+```python
+@dataclass(frozen=True)
+class MindRequest:
+    text: str
+```
+
+MindResponse
+
+```python
+@dataclass(frozen=True)
+class MindResponse:
+    success: bool
+    text: str
+    error_type: str | None = None
+    error_message: str = ""
+```
+
+Rules
+
+MindResponse is data.
+
+Not truth.
+
+Not authority.
+
+Not system state.
+
+Not a command.
+
+Not a dispatch decision.
+
+The kernel records responses.
+
+It does not interpret them.
+
+Worker Compatibility
+
+Implement a thin adapter:
+
+```python
+class MindWorker:
+```
+
+that wraps a Mind and conforms to the existing Worker protocol.
+
+The dispatcher should see:
+
+```text
+Worker
+```
+
+not:
+
+```text
+Mind
+```
+
+No special dispatcher path.
+
+No separate reasoning path.
+
+No LLM-aware kernel logic.
+
+MindWorker behavior:
+
+Input:
+
+```python
+{
+    "text": "hello"
+}
+```
+
+Creates:
+
+```python
+MindRequest(text="hello")
+```
+
+Calls:
+
+```python
+mind.invoke(request)
+```
+
+Returns:
+
+```python
+WorkerResult(
+    success=response.success,
+    outputs={
+        "mind_name": mind.name,
+        "request": request.text,
+        "response": response.text
+    },
+    error_type=response.error_type,
+    error_message=response.error_message
+)
+```
+
+Invalid input returns typed failure:
+
+```python
+error_type="INVALID_MIND_REQUEST"
+```
+
+Reference Implementation
+
+Implement:
+
+```python
+EchoMind
+```
+
+Behavior:
+
+Input:
+
+```text
+hello
+```
+
+Output:
+
+```text
+hello
+```
+
+Nothing more.
+
+No transformations.
+
+No intelligence.
+
+No side effects.
+
+Failure Handling
+
+Mind invocation is atomic.
+
+If a mind raises:
+
+```python
+MindResponse(
+    success=False,
+    text="",
+    error_type="UNEXPECTED",
+    error_message="..."
+)
+```
+
+If a future mind streams, hangs, or produces partial output, that adapter must convert it into one final MindResponse.
+
+The kernel must never handle partial cognition.
+
+Mind Artifact
+
+Mind responses appear through the ordinary worker_result artifact path.
+
+Do not add a special mind-only lifecycle path.
+
+The worker_result artifact must contain:
+
+```python
+{
+    "type": "worker_result",
+    "content": {
+        "intent_id": "...",
+        "worker_name": "EchoMind",
+        "inputs": {
+            "text": "hello"
+        },
+        "outputs": {
+            "mind_name": "EchoMind",
+            "request": "hello",
+            "response": "hello"
+        },
+        "worker_success": True,
+        "error_type": None,
+        "error_message": ""
+    }
+}
+```
+
+Optional derived projection may expose mind responses, but the ledger event remains ordinary worker output.
+
+Kernel Rules
+
+The kernel does not:
+
+* interpret responses
+* rank responses
+* compare responses
+* score responses
+* judge truth
+* execute response text
+* treat response text as command
+* perform chain-of-thought
+* perform planning
+* route based on response
+* submit follow-up intents
+
+It records:
+
+```python
+request
+response
+mind_name
+```
+
+Nothing more.
+
+Acting Boundary
+
+A mind must never act directly.
+
+A mind must not:
+
+* run shell commands
+* call dispatcher
+* mutate workspace
+* submit inbox intents
+* register workers
+* release claims
+* inspect Git
+* inspect environment
+
+If a future mind needs action, action must enter through a later explicit intent pathway.
+
+That pathway is deferred.
+
+Projection
+
+Create only if useful:
+
+```text
+mind_response_projection
+```
+
+Fields:
+
+```python
+response_id
+intent_id
+mind_name
+created_at
+last_event_id
+```
+
+Projection is derived.
+
+created_at comes from ledger timestamps.
+
+Never use:
+
+```python
+datetime.now()
+```
+
+during rebuild.
+
+Audit Extension
+
+Verify:
+
+* mind responses are ordinary worker_result artifacts
+* mind_name is preserved
+* failed responses are preserved
+* projection matches ledger if implemented
+* no special dispatcher path exists
+* no response text is executed
+
+Audit remains read-only.
+
+Stress Tests
+
+Execute:
+
+```text
+100 EchoMind requests
+```
+
+through:
+
+```text
+Inbox -> Claim -> Dispatch -> MindWorker -> Ledger -> Receipt
+```
+
+Verify:
+
+* rebuild succeeds
+* audit passes
+* receipts contain mind outputs
+* validate_chain() succeeds
+
+Tests
+
+Required tests
+
+1. EchoMind returns input unchanged.
+2. MindWorker conforms to Worker protocol.
+3. MindWorker converts dict input into MindRequest.
+4. invalid mind request returns INVALID_MIND_REQUEST.
+5. successful response recorded as worker_result.
+6. failed response recorded as worker_result.
+7. mind exception becomes UNEXPECTED.
+8. mind_name preserved.
+9. request text preserved.
+10. response text preserved.
+11. dispatcher has no mind-specific path.
+12. kernel does not execute response text.
+13. mind cannot access dispatcher.
+14. mind cannot access shell adapter.
+15. mind cannot mutate workspace.
+16. receipts contain mind outputs.
+17. projection rebuilt correctly if implemented.
+18. rebuild deterministic.
+19. rebuild idempotent.
+20. audit validates mind outputs.
+21. audit remains read-only.
+22. validate_chain() still succeeds.
+23. 100-request stress test passes.
+
+Explicitly Deferred
+
+* OpenAI
+* Claude
+* Gemini
+* MCP
+* tools
+* memory
+* planning
+* reflection
+* multi-agent systems
+* prompt generation
+* retries
+* autonomous loops
+* recursive calls
+* mind-submitted intents
+* streaming responses
+* chain-of-thought handling
+
+Definition of Done
+
+Leira can host minds without becoming an agent framework.
+
+Minds remain guests.
+
+Mind output is data.
+
+Not command.
+
+Not truth.
+
+Not authority.
+
+The dispatcher remains boring.
+
+The kernel remains ignorant.
+
+Meaning belongs to minds.
+
+Mechanics belong to the kernel.
+
+Remember:
+
+Workers think.
+
+Minds think.
+
+Kernel gates.
+
+Ledger remembers.
+
+Projections serve.
+
+Auditors verify.
+
+Receipts preserve evidence.
+
+Archives preserve history.
+
+Environment preserves context.
+
+Intelligence lives at the edges.
+
+Truth lives in receipts.
+
+Build the seam.
+
+Do not build the agent.

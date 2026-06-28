@@ -1,0 +1,468 @@
+Implement Leira v1.7: Archive & Replay
+
+Mission
+
+Extend Leira from a machine that correlates evidence into a machine that can move without losing truth.
+
+The goal is not backup.
+
+The goal is not synchronization.
+
+The goal is not restoration from opaque state.
+
+The goal is to prove that an entire workshop history can be exported, transported, imported, and replayed into an empty machine.
+
+The machine must be able to say:
+
+> Here is the history.
+>
+> Here are the files.
+>
+> Here are the receipts.
+>
+> Here are the projections rebuilt from history.
+>
+> This machine was reconstructed from evidence.
+>
+> No worker was executed during replay.
+
+Nothing more.
+
+Hard Constraints
+
+* Python only.
+* SQLite only.
+* Local filesystem only.
+* Single process only.
+* Blocking only.
+* Library, not service.
+* No threads.
+* No async.
+* No daemon.
+* No synchronization.
+* No background tasks.
+* No LLM calls.
+* No agent loops.
+* No repair.
+* No optimization.
+* No worker execution during replay.
+* No shell execution during replay.
+* No Git inspection during replay.
+* No dispatcher invocation during replay.
+
+Do not redesign:
+
+* ledger
+* lifecycle
+* inbox
+* dispatcher
+* registry
+* claims
+* receipts
+* workspace
+* provenance
+* sessions
+* auditor
+
+Adapt existing structure minimally.
+
+Files
+
+```text
+leira/
+  archive/
+    archive.py
+    replay.py
+    test_archive.py
+```
+
+Mission
+
+Archives preserve history.
+
+Replay reconstructs views.
+
+Truth remains the ledger.
+
+Artifacts remain verifiable.
+
+Nothing more.
+
+Archive Bundle
+
+Implement:
+
+```python
+@dataclass(frozen=True)
+class ArchiveBundle:
+    created_at: str
+    first_event_id: str
+    last_event_id: str
+    event_count: int
+    archive_sha256: str
+```
+
+Archive API
+
+Implement:
+
+```python
+export_archive(
+    output_path: Path
+) -> ArchiveBundle
+```
+
+Implement:
+
+```python
+import_archive(
+    archive_path: Path
+) -> ArchiveBundle
+```
+
+Implement:
+
+```python
+replay_history()
+```
+
+Archive Format
+
+Create:
+
+```text
+archive/
+  manifest.json
+  ledger_events.jsonl
+  workspace/
+    intents/
+      <intent_id>/
+        artifacts/
+          <files>
+```
+
+Manifest contains:
+
+```python
+{
+    "created_at": "...",
+    "first_event_id": "...",
+    "last_event_id": "...",
+    "event_count": 123,
+    "ledger_events_sha256": "...",
+    "workspace_sha256": "..."
+}
+```
+
+Ledger JSONL
+
+Use:
+
+```text
+ledger_events.jsonl
+```
+
+Rules:
+
+* one event per line
+* ledger order preserved
+* no timestamp sorting
+* no pretty printing
+* deterministic JSON per line
+
+Use canonical JSON:
+
+```python
+json.dumps(
+    event,
+    sort_keys=True,
+    separators=(",", ":")
+)
+```
+
+History outranks clocks.
+
+Artifact Rules
+
+Archives include:
+
+* ArtifactDescriptor metadata from ledger/projections
+* file bytes from workspace
+
+On export:
+
+* copy workspace files into archive workspace structure exactly
+* preserve relative paths
+* verify file sha256 before export
+* fail export if file hash does not match ledger
+
+On import:
+
+* recreate workspace folder structure exactly
+* write files using exclusive write mode where possible
+* verify imported file sha256 after copy
+* never mutate existing files silently
+
+Replay Rules
+
+Replay starts from:
+
+```text
+empty SQLite database
+empty projection tables
+empty or target workspace
+```
+
+Replay sequence:
+
+1. initialize schema
+2. import ledger_events.jsonl into ledger_events in ledger order
+3. validate_chain()
+4. restore workspace files
+5. rebuild all projections
+6. run audit()
+
+Replay must be:
+
+* deterministic
+* idempotent where safe
+* transactional for database import
+* non-executing
+
+Replay Immutability
+
+During replay, disable:
+
+* dispatcher
+* worker invocation
+* shell adapter execution
+* Git inspection
+* provenance recapture
+
+Replay must never:
+
+* execute workers
+* rerun shell commands
+* query current Git repositories
+* regenerate artifacts
+* reinterpret events
+* repair history
+
+Replay reconstructs views.
+
+Nothing more.
+
+Kernel Rules
+
+Archive does not:
+
+* compress
+* encrypt
+* synchronize
+* upload
+* repair
+* summarize
+* explain
+
+Replay does not:
+
+* execute
+* think
+* inspect current source
+* regenerate output
+
+Archive is a serializable record of reality.
+
+Replay re-derives representation from history.
+
+Projection Rebuild
+
+After ledger import, rebuild:
+
+* operation_state_projection
+* intent_projection
+* worker_projection
+* intent_claim_projection
+* receipt_projection
+* artifact_projection
+* provenance_projection
+* session_projection
+* session_membership_projection
+
+All rebuilds must use ledger timestamps.
+
+Never use:
+
+```python
+datetime.now()
+```
+
+during replay-derived rebuilds.
+
+Audit Extension
+
+Verify:
+
+* replayed database matches archive manifest
+* event_count matches
+* first_event_id matches
+* last_event_id matches
+* ledger_events_sha256 matches
+* receipt counts match
+* session memberships match
+* artifact descriptors match
+* artifact hashes match
+* provenance snapshots match
+* workspace files exist
+* validate_chain() succeeds
+
+Audit remains read-only.
+
+Export Determinism
+
+Exporting the same machine state twice should produce byte-identical:
+
+```text
+ledger_events.jsonl
+```
+
+and deterministic manifest fields except:
+
+```text
+created_at
+archive_sha256
+```
+
+If testing full archive hash determinism, allow passing fixed created_at.
+
+Stress Test
+
+Create:
+
+```text
+100 intents
+100 artifacts
+10 sessions
+100 provenance snapshots
+```
+
+Export archive.
+
+Delete projections.
+
+Delete database.
+
+Import archive into empty machine.
+
+Replay history.
+
+Verify:
+
+* validate_chain() succeeds
+* audit passes
+* receipts identical
+* artifact hashes identical
+* provenance snapshots identical
+* session memberships identical
+* no workers executed
+* no shell commands executed
+* no Git inspections performed
+
+Tests
+
+Required tests
+
+1. archive export succeeds.
+2. archive import succeeds.
+3. replay succeeds from empty database.
+4. ledger_events.jsonl preserves ledger order.
+5. event_count preserved.
+6. first_event_id preserved.
+7. last_event_id preserved.
+8. ledger_events_sha256 verified.
+9. workspace files copied exactly.
+10. artifact relative paths preserved.
+11. imported artifact hashes verified.
+12. export fails on corrupted artifact file.
+13. import fails on corrupted archive artifact.
+14. projections rebuilt after replay.
+15. receipts preserved.
+16. session memberships preserved.
+17. provenance snapshots preserved.
+18. deterministic ledger export.
+19. repeated export byte-identical with fixed created_at.
+20. replay deterministic.
+21. replay does not execute workers.
+22. replay does not invoke dispatcher.
+23. replay does not invoke shell adapter.
+24. replay does not inspect Git.
+25. replay does not regenerate artifacts.
+26. replay does not repair corrupted history.
+27. validate_chain() succeeds after replay.
+28. audit validates replay.
+29. replay uses ledger timestamps only.
+30. 100-intent archive/replay stress test passes.
+
+Explicitly Deferred
+
+* compression
+* encryption
+* signing
+* cloud backup
+* synchronization
+* distributed replay
+* streaming archive
+* partial archive
+* selective replay
+* migration tooling
+* OpenAI
+* Claude
+* Gemini
+* MCP
+* agent loops
+
+Definition of Done
+
+Leira can move.
+
+History survives relocation.
+
+Views are reconstructible.
+
+Artifacts remain verifiable.
+
+Replay never executes work.
+
+Truth remains in the ledger.
+
+The archive is not a backup snapshot.
+
+It is a serializable record of reality.
+
+Remember:
+
+Workers think.
+
+Kernel gates.
+
+Ledger remembers.
+
+Projections serve.
+
+Auditors verify.
+
+Receipts preserve evidence.
+
+Files preserve bytes.
+
+Git preserves provenance.
+
+Sessions preserve relationships.
+
+Archives preserve history.
+
+Replay restores views.
+
+Build portability.
+
+Do not build intelligence.
